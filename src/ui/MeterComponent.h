@@ -20,15 +20,19 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(theme::panel);
-        g.setColour(theme::knobTrack);
-        g.fillRoundedRectangle(getLocalBounds().toFloat(), 4.0f);
+        auto b = getLocalBounds().toFloat();
+        g.setColour(theme::panel.withAlpha(0.78f));
+        g.fillRoundedRectangle(b, 6.0f);
+        g.setColour(theme::knobTrack.withAlpha(0.85f));
+        g.fillRoundedRectangle(b.reduced(0.8f), 5.2f);
 
         const auto level = displayed.load();
         auto area = getLocalBounds().reduced(2).toFloat();
         area.setWidth(area.getWidth() * level);
-        g.setColour(theme::accent);
-        g.fillRoundedRectangle(area, 3.0f);
+        juce::ColourGradient fill(theme::accent, area.getX(), area.getY(),
+                                  theme::mint, area.getRight(), area.getY(), false);
+        g.setGradientFill(fill);
+        g.fillRoundedRectangle(area, 4.0f);
     }
 
 private:

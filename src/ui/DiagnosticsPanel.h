@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../audio/AudioEngine.h"
+#include "Theme.h"
 
 namespace fizzle
 {
@@ -14,10 +15,10 @@ public:
         text.setMultiLine(true);
         text.setReadOnly(true);
         text.setScrollbarsShown(true);
-        text.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff111a24));
+        text.setColour(juce::TextEditor::backgroundColourId, theme::panel.withAlpha(0.55f));
         text.setColour(juce::TextEditor::outlineColourId, juce::Colour(0x00000000));
-        text.setColour(juce::TextEditor::highlightColourId, juce::Colour(0xff3a4a63));
-        text.setColour(juce::TextEditor::textColourId, juce::Colour(0xffe8eef8));
+        text.setColour(juce::TextEditor::highlightColourId, theme::accent.withAlpha(0.22f));
+        text.setColour(juce::TextEditor::textColourId, theme::text);
         juce::Font font(juce::FontOptions(15.0f));
         font.setExtraKerningFactor(0.014f);
         text.applyFontToAllText(font);
@@ -32,9 +33,9 @@ public:
     void paint(juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
-        g.setColour(juce::Colour(0xff0f1721));
+        g.setColour(theme::panel.withAlpha(0.86f));
         g.fillRoundedRectangle(r, 12.0f);
-        g.setColour(juce::Colour(0xfff2728f).withAlpha(0.18f));
+        g.setColour(theme::accent.withAlpha(0.22f));
         g.drawRoundedRectangle(r, 12.0f, 1.0f);
     }
 

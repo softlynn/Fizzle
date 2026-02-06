@@ -14,18 +14,32 @@ namespace fizzle
 {
 namespace
 {
+const juce::Colour kUiBg(0xff0a111d);
+const juce::Colour kUiPanel(0xff172338);
+const juce::Colour kUiPanelSoft(0xff1e2d46);
+const juce::Colour kUiText(0xffeaf1ff);
+const juce::Colour kUiTextMuted(0xffa8bbdd);
+const juce::Colour kUiAccent(0xff6dbbff);
+const juce::Colour kUiAccentSoft(0xffa4ddff);
+const juce::Colour kUiMint(0xff9af7d8);
+
 class ModernLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     ModernLookAndFeel()
     {
-        setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff151b24));
-        setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff2b3545));
-        setColour(juce::ComboBox::textColourId, juce::Colour(0xffe8edf6));
-        setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1a2330));
-        setColour(juce::TextButton::textColourOffId, juce::Colour(0xffe1e8f3));
-        setColour(juce::Label::textColourId, juce::Colour(0xfff5f7fb));
-        setColour(juce::ToggleButton::textColourId, juce::Colour(0xffdee6f2));
+        setColour(juce::ComboBox::backgroundColourId, kUiPanelSoft);
+        setColour(juce::ComboBox::outlineColourId, kUiAccent.withAlpha(0.26f));
+        setColour(juce::ComboBox::textColourId, kUiText);
+        setColour(juce::TextButton::buttonColourId, kUiPanel);
+        setColour(juce::TextButton::textColourOffId, kUiText);
+        setColour(juce::Label::textColourId, kUiText);
+        setColour(juce::ToggleButton::textColourId, kUiText);
+        setColour(juce::Slider::trackColourId, kUiAccent.withAlpha(0.68f));
+        setColour(juce::Slider::thumbColourId, kUiAccentSoft);
+        setColour(juce::TextEditor::backgroundColourId, kUiPanel.withAlpha(0.7f));
+        setColour(juce::TextEditor::outlineColourId, kUiAccent.withAlpha(0.22f));
+        setColour(juce::TextEditor::textColourId, kUiText);
     }
 
     void drawButtonBackground(juce::Graphics& g,
@@ -34,18 +48,20 @@ public:
                               bool isMouseOver,
                               bool isButtonDown) override
     {
-        auto c = juce::Colour(0xff1a2330).withAlpha(0.94f);
+        auto c = kUiPanel.withAlpha(0.94f);
         if (button.getToggleState())
-            c = juce::Colour(0xff6a3041).withAlpha(0.96f);
+            c = kUiAccent.withAlpha(0.32f);
         if (isMouseOver) c = c.brighter(0.08f);
         if (isButtonDown) c = c.brighter(0.14f);
         auto b = button.getLocalBounds().toFloat();
-        g.setColour(c);
-        g.fillRoundedRectangle(b, 10.0f);
-        g.setColour(juce::Colour(0xffffffff).withAlpha(0.045f));
-        g.drawRoundedRectangle(b.reduced(0.6f), 9.5f, 0.9f);
-        g.setColour(juce::Colour(0xfff2728f).withAlpha(button.getToggleState() ? 0.22f : 0.10f));
-        g.drawRoundedRectangle(b.reduced(0.2f), 10.0f, 1.0f);
+        juce::ColourGradient fill(c.brighter(0.03f), b.getX(), b.getY(),
+                                  c.darker(0.1f), b.getX(), b.getBottom(), false);
+        g.setGradientFill(fill);
+        g.fillRoundedRectangle(b, 11.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.05f));
+        g.drawRoundedRectangle(b.reduced(0.7f), 10.3f, 0.9f);
+        g.setColour(kUiAccent.withAlpha(button.getToggleState() ? 0.30f : 0.14f));
+        g.drawRoundedRectangle(b.reduced(0.3f), 10.8f, 1.1f);
     }
 
     void drawButtonText(juce::Graphics& g,
@@ -70,7 +86,7 @@ public:
         g.setFont(f);
         g.drawFittedText(button.getButtonText(), r, juce::Justification::centredLeft, 1);
 
-        g.setColour(juce::Colour(0xfff2728f));
+        g.setColour(kUiAccentSoft);
         const auto id = button.getComponentID();
         const auto x = icon.getX();
         const auto y = icon.getY();
@@ -149,6 +165,142 @@ public:
             g.fillPath(nib);
         }
     }
+
+    void drawComboBox(juce::Graphics& g,
+                      int width,
+                      int height,
+                      bool isButtonDown,
+                      int buttonX,
+                      int buttonY,
+                      int buttonW,
+                      int buttonH,
+                      juce::ComboBox& box) override
+    {
+        juce::ignoreUnused(buttonX, buttonY, buttonW, buttonH);
+        auto r = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
+        auto base = box.isEnabled() ? kUiPanelSoft.withAlpha(0.85f) : kUiPanelSoft.withAlpha(0.65f);
+        if (box.hasKeyboardFocus(true) || isButtonDown)
+            base = base.brighter(0.08f);
+
+        juce::ColourGradient fill(base.brighter(0.03f), r.getX(), r.getY(),
+                                  base.darker(0.12f), r.getX(), r.getBottom(), false);
+        g.setGradientFill(fill);
+        g.fillRoundedRectangle(r, 9.0f);
+
+        g.setColour(kUiAccent.withAlpha(box.hasKeyboardFocus(true) ? 0.45f : 0.22f));
+        g.drawRoundedRectangle(r.reduced(0.4f), 8.6f, box.hasKeyboardFocus(true) ? 1.6f : 1.0f);
+
+        auto arrow = juce::Path();
+        const auto cx = r.getRight() - 22.0f;
+        const auto cy = r.getCentreY();
+        arrow.startNewSubPath(cx - 6.0f, cy - 2.0f);
+        arrow.lineTo(cx, cy + 3.8f);
+        arrow.lineTo(cx + 6.0f, cy - 2.0f);
+        g.setColour(kUiText.withAlpha(0.88f));
+        g.strokePath(arrow, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void positionComboBoxText(juce::ComboBox& box, juce::Label& label) override
+    {
+        auto b = box.getLocalBounds().reduced(12, 0);
+        label.setBounds(b.withTrimmedRight(28));
+        juce::Font f(juce::FontOptions(14.0f, juce::Font::plain));
+        f.setExtraKerningFactor(0.01f);
+        label.setFont(f);
+    }
+
+    void drawTickBox(juce::Graphics& g,
+                     juce::Component&,
+                     float x,
+                     float y,
+                     float w,
+                     float h,
+                     bool ticked,
+                     bool isEnabled,
+                     bool isMouseOverButton,
+                     bool isButtonDown) override
+    {
+        juce::ignoreUnused(isButtonDown);
+        auto box = juce::Rectangle<float>(x, y, w, h).reduced(1.4f);
+        auto fill = kUiPanelSoft.withAlpha(isEnabled ? 0.92f : 0.6f);
+        if (isMouseOverButton) fill = fill.brighter(0.08f);
+        g.setColour(fill);
+        g.fillRoundedRectangle(box, 4.0f);
+        g.setColour(kUiAccent.withAlpha(ticked ? 0.62f : 0.24f));
+        g.drawRoundedRectangle(box, 4.0f, ticked ? 1.6f : 1.0f);
+
+        if (ticked)
+        {
+            juce::Path p;
+            p.startNewSubPath(box.getX() + 3.0f, box.getCentreY());
+            p.lineTo(box.getX() + 6.0f, box.getBottom() - 3.0f);
+            p.lineTo(box.getRight() - 3.0f, box.getY() + 3.0f);
+            g.setColour(kUiAccentSoft);
+            g.strokePath(p, juce::PathStrokeType(1.65f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+    }
+
+    void drawLinearSlider(juce::Graphics& g,
+                          int x,
+                          int y,
+                          int width,
+                          int height,
+                          float sliderPos,
+                          float minSliderPos,
+                          float maxSliderPos,
+                          const juce::Slider::SliderStyle style,
+                          juce::Slider& slider) override
+    {
+        juce::ignoreUnused(minSliderPos, maxSliderPos, style, slider);
+        auto track = juce::Rectangle<float>(static_cast<float>(x), static_cast<float>(y + height / 2 - 3), static_cast<float>(width), 6.0f);
+        g.setColour(kUiPanelSoft.withAlpha(0.9f));
+        g.fillRoundedRectangle(track, 3.0f);
+
+        auto active = track.withRight(sliderPos);
+        juce::ColourGradient fill(kUiAccent, active.getX(), active.getY(),
+                                  kUiMint, active.getRight(), active.getY(), false);
+        g.setGradientFill(fill);
+        g.fillRoundedRectangle(active, 3.0f);
+
+        auto knob = juce::Rectangle<float>(sliderPos - 7.0f, track.getCentreY() - 7.0f, 14.0f, 14.0f);
+        g.setColour(kUiAccentSoft);
+        g.fillEllipse(knob);
+        g.setColour(juce::Colours::white.withAlpha(0.28f));
+        g.drawEllipse(knob, 1.0f);
+    }
+
+    void drawRotarySlider(juce::Graphics& g,
+                          int x,
+                          int y,
+                          int width,
+                          int height,
+                          float sliderPosProportional,
+                          float rotaryStartAngle,
+                          float rotaryEndAngle,
+                          juce::Slider& slider) override
+    {
+        juce::ignoreUnused(slider);
+        auto r = juce::Rectangle<float>(static_cast<float>(x), static_cast<float>(y), static_cast<float>(width), static_cast<float>(height)).reduced(2.0f);
+        auto radius = juce::jmin(r.getWidth(), r.getHeight()) * 0.5f;
+        auto centre = r.getCentre();
+        auto angle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
+
+        auto knob = juce::Rectangle<float>(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f);
+        g.setColour(kUiPanel.withAlpha(0.95f));
+        g.fillEllipse(knob);
+        g.setColour(kUiAccent.withAlpha(0.26f));
+        g.drawEllipse(knob, 1.1f);
+
+        juce::Path valueArc;
+        valueArc.addCentredArc(centre.x, centre.y, radius - 2.6f, radius - 2.6f, 0.0f, rotaryStartAngle, angle, true);
+        g.setColour(kUiAccentSoft);
+        g.strokePath(valueArc, juce::PathStrokeType(2.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        juce::Path thumb;
+        thumb.addRectangle(-1.3f, -radius + 5.5f, 2.6f, radius * 0.44f);
+        g.setColour(kUiMint);
+        g.fillPath(thumb, juce::AffineTransform::rotation(angle).translated(centre.x, centre.y));
+    }
 };
 
 class SettingsOverlay final : public juce::Component
@@ -158,14 +310,16 @@ public:
     {
         g.fillAll(juce::Colours::black.withAlpha(0.42f));
         auto panel = getLocalBounds().reduced(80, 56).toFloat();
-        g.setColour(juce::Colour(0xff141b26));
-        g.fillRoundedRectangle(panel, 16.0f);
-        g.setColour(juce::Colour(0xfff2728f).withAlpha(0.78f));
-        g.drawRoundedRectangle(panel, 16.0f, 1.6f);
+        juce::ColourGradient fill(kUiPanelSoft.withAlpha(0.96f), panel.getX(), panel.getY(),
+                                  kUiPanel.withAlpha(0.93f), panel.getX(), panel.getBottom(), false);
+        g.setGradientFill(fill);
+        g.fillRoundedRectangle(panel, 18.0f);
+        g.setColour(kUiAccent.withAlpha(0.58f));
+        g.drawRoundedRectangle(panel, 18.0f, 1.4f);
         auto sidebar = panel.removeFromLeft(180.0f);
-        g.setColour(juce::Colour(0xff101722));
+        g.setColour(kUiBg.withAlpha(0.78f));
         g.fillRoundedRectangle(sidebar, 16.0f);
-        g.setColour(juce::Colour(0xfff2728f).withAlpha(0.24f));
+        g.setColour(kUiAccent.withAlpha(0.22f));
         g.drawLine(sidebar.getRight(), panel.getY() + 8.0f, sidebar.getRight(), panel.getBottom() - 8.0f, 1.0f);
     }
 };
@@ -233,7 +387,7 @@ public:
         openButton.addListener(this);
         mixLabel.setText("Wet/Dry", juce::dontSendNotification);
         mixLabel.setJustificationType(juce::Justification::centredRight);
-        mixLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9fb0c4));
+        mixLabel.setColour(juce::Label::textColourId, kUiTextMuted);
         mixLabel.setFont(juce::FontOptions(10.5f, juce::Font::plain));
         name.setJustificationType(juce::Justification::centredLeft);
         name.setInterceptsMouseClicks(false, false);
@@ -265,17 +419,17 @@ public:
     void paint(juce::Graphics& g) override
     {
         const auto b = getLocalBounds().toFloat();
-        auto fill = juce::Colour(0xff222b36);
-        auto border = juce::Colour(0xff6f7e96).withAlpha(0.3f);
+        auto fill = kUiPanelSoft.withAlpha(0.78f);
+        auto border = kUiAccent.withAlpha(0.18f);
         if (selected)
         {
-            fill = juce::Colour(0xff2d2430);
-            border = juce::Colour(0xfff2728f).withAlpha(0.95f);
+            fill = kUiPanel.withAlpha(0.94f);
+            border = kUiAccent.withAlpha(0.85f);
         }
         if (dragging)
         {
             fill = fill.brighter(0.08f);
-            border = juce::Colour(0xfff2728f);
+            border = kUiAccentSoft;
             g.setColour(juce::Colours::black.withAlpha(0.35f));
             g.fillRoundedRectangle(b.translated(0.0f, 2.0f), 8.0f);
         }
@@ -452,13 +606,13 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     currentPresetLabel.setText("Current: Default", juce::dontSendNotification);
     virtualMicStatusLabel.setText("Virtual Mic: not routed", juce::dontSendNotification);
     effectsHintLabel.setText({}, juce::dontSendNotification);
-    effectsHintLabel.setColour(juce::Label::textColourId, juce::Colour(0xfff2a3b8));
+    effectsHintLabel.setColour(juce::Label::textColourId, kUiAccentSoft);
     juce::Font hintStatusFont(juce::FontOptions(12.5f, juce::Font::plain));
     hintStatusFont.setExtraKerningFactor(0.01f);
     effectsHintLabel.setFont(hintStatusFont);
     effectsHintLabel.setJustificationType(juce::Justification::centredRight);
     dragHintLabel.setText("Drag VST rows to reorder", juce::dontSendNotification);
-    dragHintLabel.setColour(juce::Label::textColourId, juce::Colour(0xffa4afbd));
+    dragHintLabel.setColour(juce::Label::textColourId, kUiTextMuted);
     juce::Font hintFont(juce::FontOptions(12.0f));
     hintFont.setExtraKerningFactor(0.01f);
     dragHintLabel.setFont(hintFont);
@@ -550,16 +704,16 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
             return;
         const auto& a = runningApps[static_cast<size_t>(idx)];
         auto r = juce::Rectangle<int>(0, 0, width, height).reduced(2, 1);
-        g.setColour(selected ? juce::Colour(0xff312630) : juce::Colour(0xff1b232f));
+        g.setColour(selected ? kUiPanel.withAlpha(0.95f) : kUiPanelSoft.withAlpha(0.8f));
         g.fillRoundedRectangle(r.toFloat(), 6.0f);
         if (selected)
         {
-            g.setColour(juce::Colour(0xfff2728f));
+            g.setColour(kUiAccentSoft);
             g.drawRoundedRectangle(r.toFloat(), 6.0f, 1.4f);
         }
         if (a.icon.isValid())
             g.drawImageWithin(a.icon, r.getX() + 6, r.getY() + 4, 16, 16, juce::RectanglePlacement::centred);
-        g.setColour(juce::Colour(0xffe9eef7));
+        g.setColour(kUiText);
         juce::Font rowFont(juce::FontOptions(13.4f));
         rowFont.setExtraKerningFactor(0.014f);
         g.setFont(rowFont);
@@ -571,9 +725,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     };
     appListBox.setModel(programListModel.get());
     appListBox.setRowHeight(24);
-    appListBox.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff121823));
+    appListBox.setColour(juce::ListBox::backgroundColourId, kUiPanel.withAlpha(0.7f));
     appListBox.setOutlineThickness(1);
-    appListBox.setColour(juce::ListBox::outlineColourId, juce::Colour(0xff2f3b4a));
+    appListBox.setColour(juce::ListBox::outlineColourId, kUiAccent.withAlpha(0.25f));
     appListBox.setMultipleSelectionEnabled(false);
 
     enabledProgramListModel = std::make_unique<ProgramListModel>();
@@ -584,14 +738,14 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
             return;
         const auto name = cachedSettings.autoEnableProcessNames[row];
         auto r = juce::Rectangle<int>(0, 0, width, height).reduced(2, 1);
-        g.setColour(selected ? juce::Colour(0xff352834) : juce::Colour(0xff1b232f));
+        g.setColour(selected ? kUiPanel.withAlpha(0.95f) : kUiPanelSoft.withAlpha(0.8f));
         g.fillRoundedRectangle(r.toFloat(), 6.0f);
         if (selected)
         {
-            g.setColour(juce::Colour(0xfff2728f));
+            g.setColour(kUiAccentSoft);
             g.drawRoundedRectangle(r.toFloat(), 6.0f, 1.2f);
         }
-        g.setColour(juce::Colour(0xfff2f5fb));
+        g.setColour(kUiText);
         juce::Font rowFont(juce::FontOptions(13.0f));
         rowFont.setExtraKerningFactor(0.012f);
         g.setFont(rowFont);
@@ -604,9 +758,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     };
     enabledProgramsListBox.setModel(enabledProgramListModel.get());
     enabledProgramsListBox.setRowHeight(24);
-    enabledProgramsListBox.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff121823));
+    enabledProgramsListBox.setColour(juce::ListBox::backgroundColourId, kUiPanel.withAlpha(0.7f));
     enabledProgramsListBox.setOutlineThickness(1);
-    enabledProgramsListBox.setColour(juce::ListBox::outlineColourId, juce::Colour(0xff2f3b4a));
+    enabledProgramsListBox.setColour(juce::ListBox::outlineColourId, kUiAccent.withAlpha(0.25f));
 
     settingsPanel = std::make_unique<SettingsOverlay>();
     settingsPanel->addAndMakeVisible(settingsNavLabel);
@@ -628,6 +782,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     addAndMakeVisible(*settingsPanel);
     settingsPanel->setInterceptsMouseClicks(true, true);
     settingsPanel->setVisible(false);
+    settingsPanel->setAlpha(0.0f);
+    settingsPanelTargetVisible = false;
+    settingsPanelAlpha = 0.0f;
 
     outputGainLabel.setText("Virtual Mic Gain", juce::dontSendNotification);
     addAndMakeVisible(outputGainLabel);
@@ -1091,11 +1248,16 @@ void MainComponent::setSettingsPanelVisible(bool visible)
 {
     if (settingsPanel == nullptr)
         return;
-    if (visible) refreshRunningApps();
-    refreshProgramsList();
-    settingsPanel->setVisible(visible);
-    if (visible) settingsPanel->toFront(true);
-    repaint();
+
+    settingsPanelTargetVisible = visible;
+    if (visible)
+    {
+        refreshRunningApps();
+        refreshProgramsList();
+        settingsPanel->setVisible(true);
+        settingsPanel->toFront(true);
+    }
+    settingsPanel->setInterceptsMouseClicks(visible, visible);
 }
 
 void MainComponent::refreshKnownPlugins()
@@ -1709,7 +1871,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
     else if (button == &settingsButton)
     {
-        setSettingsPanelVisible(settingsPanel != nullptr && ! settingsPanel->isVisible());
+        setSettingsPanelVisible(! settingsPanelTargetVisible);
     }
     else if (button == &refreshAppsButton)
     {
@@ -1931,6 +2093,20 @@ void MainComponent::timerCallback()
             effectsHintLabel.setText({}, juce::dontSendNotification);
     }
 
+    if (settingsPanel != nullptr)
+    {
+        const auto target = settingsPanelTargetVisible ? 1.0f : 0.0f;
+        settingsPanelAlpha += (target - settingsPanelAlpha) * 0.22f;
+        if (std::abs(settingsPanelAlpha - target) < 0.01f)
+            settingsPanelAlpha = target;
+
+        settingsPanel->setAlpha(settingsPanelAlpha);
+        if (! settingsPanelTargetVisible && settingsPanelAlpha <= 0.01f)
+            settingsPanel->setVisible(false);
+        else if (settingsPanelTargetVisible && ! settingsPanel->isVisible())
+            settingsPanel->setVisible(true);
+    }
+
     repaint();
 }
 
@@ -1976,55 +2152,63 @@ void MainComponent::paint(juce::Graphics& g)
     shellPath.addRoundedRectangle(shell, shellRadius);
     g.reduceClipRegion(shellPath);
 
-    const auto pulse = 0.5f + 0.5f * std::sin(uiPulse * 0.55f);
-    juce::ColourGradient bg(juce::Colour(0xff10151e), shell.getX(), shell.getY(),
-                            juce::Colour(0xff141b25), shell.getX(), shell.getBottom(), false);
+    const auto pulse = 0.5f + 0.5f * std::sin(uiPulse * 0.6f);
+    juce::ColourGradient bg(kUiBg.brighter(0.08f), shell.getX(), shell.getY(),
+                            kUiBg.darker(0.22f), shell.getX(), shell.getBottom(), false);
     g.setGradientFill(bg);
     g.fillRect(getLocalBounds());
 
+    auto outer = shell.expanded(2.0f);
+    g.setColour(kUiAccent.withAlpha(0.08f + pulse * 0.04f));
+    g.drawRoundedRectangle(outer, shellRadius + 2.0f, 2.0f);
+
     auto card = shell.reduced(3.5f);
-    g.setColour(juce::Colour(0xff181f2a).withAlpha(0.92f));
+    juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(0.9f), card.getX(), card.getY(),
+                                  kUiPanel.withAlpha(0.95f), card.getX(), card.getBottom(), false);
+    g.setGradientFill(cardFill);
     g.fillRoundedRectangle(card, 21.0f);
 
-    auto header = card.removeFromTop(52.0f);
+    auto header = card.removeFromTop(54.0f);
     juce::Path headerPath;
     headerPath.addRoundedRectangle(header.getX(), header.getY(), header.getWidth(), header.getHeight() + 10.0f,
                                    18.0f, 18.0f, true, true, false, false);
-    g.setColour(juce::Colour(0xff1d2633).withAlpha(0.93f));
+    juce::ColourGradient headerFill(kUiPanel.withAlpha(0.95f), header.getX(), header.getY(),
+                                    kUiPanelSoft.withAlpha(0.9f), header.getX(), header.getBottom(), false);
+    g.setGradientFill(headerFill);
     g.fillPath(headerPath);
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colour(0xffcdd8ea).withAlpha(0.018f));
+    g.setColour(juce::Colours::white.withAlpha(0.02f));
     g.fillRoundedRectangle(chainPane, 10.0f);
-    g.setColour(juce::Colour(0xfff2728f).withAlpha(0.065f));
+    g.setColour(kUiAccent.withAlpha(0.16f));
     g.drawRoundedRectangle(chainPane, 10.0f, 1.1f);
     auto diagPane = diagnostics.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colour(0xffcdd8ea).withAlpha(0.018f));
+    g.setColour(juce::Colours::white.withAlpha(0.02f));
     g.fillRoundedRectangle(diagPane, 10.0f);
-    g.setColour(juce::Colour(0xfff2728f).withAlpha(0.06f));
+    g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);
 
-    g.setColour(juce::Colour(0xfff2728f).withAlpha(0.16f + pulse * 0.08f));
-    g.drawRoundedRectangle(shell.reduced(0.9f), shellRadius - 0.8f, 1.6f);
-    g.setColour(juce::Colour(0xfff2728f).withAlpha(0.06f + pulse * 0.03f));
-    g.drawRoundedRectangle(shell.expanded(2.2f), shellRadius + 1.8f, 2.0f);
+    g.setColour(kUiAccent.withAlpha(0.19f + pulse * 0.06f));
+    g.drawRoundedRectangle(shell.reduced(0.9f), shellRadius - 0.8f, 1.5f);
+    g.setColour(kUiAccentSoft.withAlpha(0.06f + pulse * 0.03f));
+    g.drawRoundedRectangle(shell.expanded(1.8f), shellRadius + 1.5f, 1.6f);
 
     const auto dividerY = header.getBottom() - 1.0f;
     const auto dividerX = header.getX() + 16.0f;
     const auto dividerW = header.getWidth() - 32.0f;
-    g.setColour(juce::Colour(0xfff2728f).withAlpha(0.10f));
-    g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.1f);
+    g.setColour(kUiAccent.withAlpha(0.12f));
+    g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.0f);
     const auto loopWidth = dividerW + 120.0f;
-    const auto phase = std::fmod(uiPulse * 92.0f, loopWidth);
+    const auto phase = std::fmod(uiPulse * 80.0f, loopWidth);
     const auto x0 = dividerX - 60.0f + phase;
     juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
-                               juce::Colour(0xffffffff).withAlpha(0.10f), x0 + 52.0f, dividerY, false);
+                               kUiAccentSoft.withAlpha(0.30f), x0 + 64.0f, dividerY, false);
     sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
     g.setGradientFill(sweep);
     g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.0f, dividerW, 2.0f));
 
     const auto micIcon = inputIconBounds.toFloat();
-    g.setColour(juce::Colour(0xfff0f4fb));
+    g.setColour(kUiText);
     g.drawRoundedRectangle(micIcon.getX() + 3.5f, micIcon.getY() + 2.0f, 7.0f, 8.0f, 2.8f, 1.2f);
     g.drawLine(micIcon.getCentreX(), micIcon.getY() + 10.2f, micIcon.getCentreX(), micIcon.getBottom() - 1.8f, 1.2f);
     g.drawLine(micIcon.getCentreX() - 2.4f, micIcon.getBottom() - 1.8f, micIcon.getCentreX() + 2.4f, micIcon.getBottom() - 1.8f, 1.2f);
@@ -2038,9 +2222,9 @@ void MainComponent::paint(juce::Graphics& g)
     {
         auto lb = routeSpeakersButton.getBounds().toFloat();
         auto led = juce::Rectangle<float>(lb.getRight() - 16.0f, lb.getCentreY() - 4.0f, 8.0f, 8.0f);
-        g.setColour(juce::Colour(0xff43d17a));
+        g.setColour(kUiMint);
         g.fillEllipse(led);
-        g.setColour(juce::Colour(0xff43d17a).withAlpha(0.35f));
+        g.setColour(kUiMint.withAlpha(0.35f));
         g.drawEllipse(led.expanded(2.0f), 1.3f);
     }
 

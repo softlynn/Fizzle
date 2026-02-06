@@ -90,7 +90,9 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::unique_ptr<juce::DocumentWindow> pluginEditorWindow;
     float uiPulse { 0.0f };
+    float settingsPanelAlpha { 0.0f };
     bool scannedOnVisible { false };
+    bool settingsPanelTargetVisible { false };
     juce::String currentPresetName { "Default" };
     juce::String pendingPresetName;
     int dragFromRow { -1 };
