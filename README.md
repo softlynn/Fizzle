@@ -35,7 +35,7 @@ On first launch, Fizzle shows a quick in-app guide.
 If you skip it, use this:
 
 1. Choose your mic in **Input Mic**.
-2. Choose your virtual mic in **Virtual Mic Output**.
+2. Choose your virtual mic in **Fizzle Mic Output**.
 3. Turn **Effects On**.
 4. Add your VST3 plugin(s).
 5. Save a preset.
@@ -46,7 +46,7 @@ If you skip it, use this:
 - Toggle **Effects On/Off** quickly.
 - Change preset from the **Preset** dropdown.
 - Use **Restart Audio** if your device changes.
-- In **Settings**, enable **Auto-download new updates** to fetch new installers automatically.
+- In **Settings → Updates**, enable **Auto-download new updates** to fetch new installers automatically.
 
 ## 🛠️ Troubleshooting
 

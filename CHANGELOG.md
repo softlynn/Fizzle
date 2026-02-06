@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.1 - UI and Updates Polish
+
+### Added
+- Dedicated `Updates` tab inside Settings.
+- Quick links to GitHub repo and website in both Settings and About dialog.
+- Subtle version watermark in the bottom-right of the main window.
+
+### Changed
+- Cohesive custom top header with embedded Fizzle logo.
+- Salmon-tinted window control buttons (minimize, maximize, close).
+- Faster settings overlay fade animation.
+- Click-fade accent on `Save Preset` and `About` buttons.
+- Virtual mic branding updates (`Fizzle Mic` naming + Fizzle icon treatment).
+
 ## v0.1.0 - First Public Release
 
 ### Added
