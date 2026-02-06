@@ -23,19 +23,26 @@ public:
 
     void paintButton(juce::Graphics& g, bool isMouseOverButton, bool isButtonDown) override
     {
-        auto b = getLocalBounds().toFloat().reduced(2.0f);
+        auto b = getLocalBounds().toFloat().reduced(1.5f);
         auto fill = kind == juce::DocumentWindow::closeButton ? kWindowButtonSalmon : kWindowButtonSalmonSoft;
+        const float hoverAmount = isMouseOverButton ? 1.0f : 0.0f;
         if (isMouseOverButton)
-            fill = fill.brighter(0.07f);
+            fill = fill.brighter(0.2f);
         if (isButtonDown)
-            fill = fill.darker(0.08f);
+            fill = fill.darker(0.22f);
 
-        g.setColour(fill.withAlpha(0.92f));
+        if (isMouseOverButton)
+        {
+            g.setColour(fill.withAlpha(0.26f + (isButtonDown ? 0.14f : 0.0f)));
+            g.fillEllipse(b.expanded(1.7f));
+        }
+
+        g.setColour(fill.withAlpha(0.98f));
         g.fillEllipse(b);
-        g.setColour(juce::Colours::white.withAlpha(0.35f));
-        g.drawEllipse(b, 1.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.55f + hoverAmount * 0.2f));
+        g.drawEllipse(b, isButtonDown ? 1.8f : 1.2f);
 
-        g.setColour(juce::Colour(0xff2a1f26).withAlpha(0.85f));
+        g.setColour(juce::Colour(0xff2a1f26).withAlpha(isMouseOverButton ? 0.96f : 0.84f));
         const auto cx = b.getCentreX();
         const auto cy = b.getCentreY();
         const auto w = b.getWidth();
@@ -90,7 +97,7 @@ public:
         g.setGradientFill(fill);
         g.fillPath(chrome);
 
-        g.setColour(kWindowBorder.withAlpha(0.23f));
+        g.setColour(kWindowBorder.withAlpha(0.10f));
         g.drawLine(12.0f, r.getBottom() - 1.0f, r.getRight() - 12.0f, r.getBottom() - 1.0f, 1.1f);
 
         auto iconBounds = juce::Rectangle<int>(titleSpaceX + 4, juce::jmax(2, (height - 20) / 2), 20, 20);
@@ -158,7 +165,7 @@ MainWindow::MainWindow(std::unique_ptr<MainComponent> content)
     lookAndFeel = std::make_unique<WindowLookAndFeel>();
     setLookAndFeel(lookAndFeel.get());
     setUsingNativeTitleBar(false);
-    setTitleBarHeight(40);
+    setTitleBarHeight(36);
     setResizable(true, false);
     setResizeLimits(980, 620, 1500, 900);
     setOpaque(false);

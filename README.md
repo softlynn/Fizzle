@@ -19,8 +19,9 @@
 - Lets you load and reorder VST3 plugins.
 - Runs from the tray with quick controls.
 - Saves presets so you can switch setups fast.
+- Works smoothly with Discord and LIVE voice chat workflows.
 - Includes a first-launch quick tutorial in the app.
-- Includes optional auto-download updates in Settings.
+- Includes optional auto-install updates in Settings.
 
 ## 🚀 Install
 
@@ -46,7 +47,8 @@ If you skip it, use this:
 - Toggle **Effects On/Off** quickly.
 - Change preset from the **Preset** dropdown.
 - Use **Restart Audio** if your device changes.
-- In **Settings → Updates**, enable **Auto-download new updates** to fetch new installers automatically.
+- In **Settings → Updates**, enable **Auto-install new updates** to download and apply updates automatically.
+- In **Settings → Startup**, choose **Start with Windows** and tray/app-follow behavior.
 
 ## 🛠️ Troubleshooting
 

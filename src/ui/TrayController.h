@@ -26,6 +26,7 @@ public:
 
 private:
     Listener& listener;
+    std::unique_ptr<juce::LookAndFeel_V4> trayLookAndFeel;
     juce::Image createIcon() const;
     void showContextMenu();
 };

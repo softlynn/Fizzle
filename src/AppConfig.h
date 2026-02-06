@@ -42,6 +42,9 @@ struct EngineSettings
     juce::String autoEnableProcessPath;
     juce::String lastPresetName;
     bool hasSeenFirstLaunchGuide { false };
-    bool autoDownloadUpdates { false };
+    bool autoInstallUpdates { false };
+    bool startWithWindows { false };
+    bool startMinimizedToTray { false };
+    bool followAutoEnableWindowState { false };
 };
 }

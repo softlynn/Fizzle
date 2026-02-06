@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.2 - Auto-Install and Startup Controls
+
+### Added
+- New `Startup` tab in Settings.
+- `Start with Windows` option.
+- `Start minimized to tray` option.
+- `Open/close window with Program Auto-Enable` option.
+
+### Changed
+- Update flow now supports automatic silent install (not only download).
+- Faster settings panel fade.
+- Cleaner tray menu styling with rounded visuals and improved typography.
+- More obvious window controls on hover/press.
+- Header/body visual integration polish.
+- Updated docs/site copy for Discord/LIVE support and automatic updates.
+
 ## v0.1.1 - UI and Updates Polish
 
 ### Added

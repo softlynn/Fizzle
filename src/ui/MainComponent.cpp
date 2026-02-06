@@ -53,6 +53,38 @@ int compareSemver(const juce::String& lhs, const juce::String& rhs)
     return 0;
 }
 
+#if JUCE_WINDOWS
+bool setRunAtStartupEnabled(bool enabled, bool launchToTray)
+{
+    constexpr auto subkey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    constexpr auto valueName = L"Fizzle";
+    HKEY key = nullptr;
+    const auto createResult = RegCreateKeyExW(HKEY_CURRENT_USER, subkey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
+    if (createResult != ERROR_SUCCESS || key == nullptr)
+        return false;
+
+    bool ok = true;
+    if (enabled)
+    {
+        auto exe = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getFullPathName().replace("\"", "\\\"");
+        auto command = "\"" + exe + "\"";
+        if (launchToTray)
+            command << " --tray";
+        const auto data = command.toWideCharPointer();
+        const auto bytes = static_cast<DWORD>((wcslen(data) + 1) * sizeof(wchar_t));
+        ok = (RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(data), bytes) == ERROR_SUCCESS);
+    }
+    else
+    {
+        const auto removeResult = RegDeleteValueW(key, valueName);
+        ok = (removeResult == ERROR_SUCCESS || removeResult == ERROR_FILE_NOT_FOUND);
+    }
+
+    RegCloseKey(key);
+    return ok;
+}
+#endif
+
 class ModernLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
@@ -633,7 +665,11 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     updatesLabel.setText("Updates", juce::dontSendNotification);
     updatesLinksLabel.setText("Quick links", juce::dontSendNotification);
     updatesLinksLabel.setColour(juce::Label::textColourId, kUiTextMuted);
-    updateStatusLabel.setText("Auto-download is off.", juce::dontSendNotification);
+    startupLabel.setText("Startup", juce::dontSendNotification);
+    startupHintLabel.setText("Startup controls and app-follow behavior.", juce::dontSendNotification);
+    startupHintLabel.setColour(juce::Label::textColourId, kUiTextMuted);
+    startupHintLabel.setJustificationType(juce::Justification::topLeft);
+    updateStatusLabel.setText("Auto-install is off.", juce::dontSendNotification);
     updateStatusLabel.setColour(juce::Label::textColourId, kUiTextMuted);
     updateStatusLabel.setJustificationType(juce::Justification::topLeft);
     updateStatusLabel.setMinimumHorizontalScale(0.82f);
@@ -646,6 +682,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     sectionLabelFont.setExtraKerningFactor(0.01f);
     updatesLabel.setFont(sectionLabelFont);
     updatesLinksLabel.setFont(juce::FontOptions(12.5f));
+    startupLabel.setFont(sectionLabelFont);
+    startupHintLabel.setFont(juce::FontOptions(12.5f));
     currentPresetLabel.setText("Current: Default", juce::dontSendNotification);
     virtualMicStatusLabel.setText("Fizzle Mic: not routed", juce::dontSendNotification);
     effectsHintLabel.setText({}, juce::dontSendNotification);
@@ -732,10 +770,15 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     updatesWebsiteButton.setComponentID("about");
     settingsNavAutoEnableButton.setClickingTogglesState(true);
     settingsNavUpdatesButton.setClickingTogglesState(true);
+    settingsNavStartupButton.setClickingTogglesState(true);
     settingsNavAutoEnableButton.setToggleState(true, juce::dontSendNotification);
     settingsNavUpdatesButton.setToggleState(false, juce::dontSendNotification);
+    settingsNavStartupButton.setToggleState(false, juce::dontSendNotification);
     autoEnableToggle.setButtonText("Auto Enable by Program");
-    autoDownloadUpdatesToggle.setButtonText("Auto-download new updates");
+    autoDownloadUpdatesToggle.setButtonText("Auto-install new updates");
+    startWithWindowsToggle.setButtonText("Start with Windows");
+    startMinimizedToggle.setButtonText("Start minimized to tray");
+    followAutoEnableWindowToggle.setButtonText("Open/close window with Program Auto-Enable");
     appSearchEditor.setTextToShowWhenEmpty("Type to search programs...", juce::Colour(0xff9aa7b6));
     appSearchEditor.onTextChange = [this]
     {
@@ -760,8 +803,12 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     checkUpdatesButton.addListener(this);
     settingsNavAutoEnableButton.addListener(this);
     settingsNavUpdatesButton.addListener(this);
+    settingsNavStartupButton.addListener(this);
     updatesGithubButton.addListener(this);
     updatesWebsiteButton.addListener(this);
+    startWithWindowsToggle.addListener(this);
+    startMinimizedToggle.addListener(this);
+    followAutoEnableWindowToggle.addListener(this);
 
     programListModel = std::make_unique<ProgramListModel>();
     programListModel->rowCount = [this]() { return static_cast<int>(filteredProgramIndices.size()); };
@@ -836,6 +883,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(settingsNavLabel);
     settingsPanel->addAndMakeVisible(settingsNavAutoEnableButton);
     settingsPanel->addAndMakeVisible(settingsNavUpdatesButton);
+    settingsPanel->addAndMakeVisible(settingsNavStartupButton);
     settingsPanel->addAndMakeVisible(appEnableLabel);
     settingsPanel->addAndMakeVisible(appSearchLabel);
     settingsPanel->addAndMakeVisible(appListLabel);
@@ -855,6 +903,11 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(updatesGithubButton);
     settingsPanel->addAndMakeVisible(updatesWebsiteButton);
     settingsPanel->addAndMakeVisible(updateStatusLabel);
+    settingsPanel->addAndMakeVisible(startupLabel);
+    settingsPanel->addAndMakeVisible(startWithWindowsToggle);
+    settingsPanel->addAndMakeVisible(startMinimizedToggle);
+    settingsPanel->addAndMakeVisible(followAutoEnableWindowToggle);
+    settingsPanel->addAndMakeVisible(startupHintLabel);
     settingsPanel->addAndMakeVisible(closeSettingsButton);
 
     addAndMakeVisible(*settingsPanel);
@@ -902,9 +955,13 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
         cachedSettings.lastPresetName = persistedLastPreset;
     engine.getVstHost().importScannedPaths(cachedSettings.scannedVstPaths);
     autoEnableToggle.setToggleState(cachedSettings.autoEnableByApp, juce::dontSendNotification);
-    autoDownloadUpdatesToggle.setToggleState(cachedSettings.autoDownloadUpdates, juce::dontSendNotification);
-    setUpdateStatus(cachedSettings.autoDownloadUpdates ? "Auto-download is enabled." : "Auto-download is off.");
+    autoDownloadUpdatesToggle.setToggleState(cachedSettings.autoInstallUpdates, juce::dontSendNotification);
+    startWithWindowsToggle.setToggleState(cachedSettings.startWithWindows, juce::dontSendNotification);
+    startMinimizedToggle.setToggleState(cachedSettings.startMinimizedToTray, juce::dontSendNotification);
+    followAutoEnableWindowToggle.setToggleState(cachedSettings.followAutoEnableWindowState, juce::dontSendNotification);
+    setUpdateStatus(cachedSettings.autoInstallUpdates ? "Auto-install is enabled." : "Auto-install is off.");
     setActiveSettingsTab(0);
+    applyWindowsStartupSetting();
     refreshRunningApps();
     refreshEnabledProgramsList();
     if (cachedSettings.autoEnableProcessPath.isNotEmpty())
@@ -944,7 +1001,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
         });
     }
 
-    if (cachedSettings.autoDownloadUpdates)
+    if (cachedSettings.autoInstallUpdates)
     {
         juce::Component::SafePointer<MainComponent> safeThis(this);
         juce::Timer::callAfterDelay(1200, [safeThis]
@@ -1356,6 +1413,8 @@ void MainComponent::setSettingsPanelVisible(bool visible)
 void MainComponent::updateSettingsTabVisibility()
 {
     const bool autoEnableTab = (activeSettingsTab == 0);
+    const bool updatesTab = (activeSettingsTab == 1);
+    const bool startupTab = (activeSettingsTab == 2);
     auto setVisible = [](juce::Component& component, bool visible)
     {
         component.setVisible(visible);
@@ -1388,15 +1447,26 @@ void MainComponent::updateSettingsTabVisibility()
                      static_cast<juce::Component*>(&updatesWebsiteButton) })
     {
         if (c != nullptr)
-            setVisible(*c, ! autoEnableTab);
+            setVisible(*c, updatesTab);
+    }
+
+    for (auto* c : { static_cast<juce::Component*>(&startupLabel),
+                     static_cast<juce::Component*>(&startWithWindowsToggle),
+                     static_cast<juce::Component*>(&startMinimizedToggle),
+                     static_cast<juce::Component*>(&followAutoEnableWindowToggle),
+                     static_cast<juce::Component*>(&startupHintLabel) })
+    {
+        if (c != nullptr)
+            setVisible(*c, startupTab);
     }
 }
 
 void MainComponent::setActiveSettingsTab(int tab)
 {
-    activeSettingsTab = juce::jlimit(0, 1, tab);
+    activeSettingsTab = juce::jlimit(0, 2, tab);
     settingsNavAutoEnableButton.setToggleState(activeSettingsTab == 0, juce::dontSendNotification);
     settingsNavUpdatesButton.setToggleState(activeSettingsTab == 1, juce::dontSendNotification);
+    settingsNavStartupButton.setToggleState(activeSettingsTab == 2, juce::dontSendNotification);
     updateSettingsTabVisibility();
     resized();
 }
@@ -1407,6 +1477,14 @@ void MainComponent::triggerButtonFlash(juce::Button* button)
         savePresetFlashAlpha = 1.0f;
     else if (button == &aboutButton)
         aboutFlashAlpha = 1.0f;
+}
+
+void MainComponent::applyWindowsStartupSetting()
+{
+#if JUCE_WINDOWS
+    if (! setRunAtStartupEnabled(cachedSettings.startWithWindows, cachedSettings.startMinimizedToTray))
+        Logger::instance().log("Failed to update Windows startup registration.");
+#endif
 }
 
 void MainComponent::refreshKnownPlugins()
@@ -1693,13 +1771,10 @@ void MainComponent::triggerUpdateCheck(bool manualTrigger)
     hasCheckedUpdatesThisSession = true;
     setUpdateStatus("Checking for updates...");
 
-    const auto autoDownload = cachedSettings.autoDownloadUpdates;
+    const auto autoInstall = cachedSettings.autoInstallUpdates;
     juce::Component::SafePointer<MainComponent> safeThis(this);
-    std::thread([safeThis, autoDownload, manualTrigger]
+    std::thread([safeThis, autoInstall, manualTrigger]
     {
-        juce::String status = "Update check failed.";
-        bool warning = false;
-
         auto finish = [safeThis](juce::String message, bool warn, juce::String latestVersion)
         {
             juce::MessageManager::callAsync([safeThis, message = std::move(message), warn, latestVersion = std::move(latestVersion)]()
@@ -1770,11 +1845,13 @@ void MainComponent::triggerUpdateCheck(bool manualTrigger)
             return;
         }
 
-        if (! autoDownload || installerUrl.isEmpty())
+        if (! autoInstall || installerUrl.isEmpty())
         {
             auto msg = "Update available: v" + latestVersion;
-            if (! autoDownload)
-                msg << " (enable auto-download to fetch automatically)";
+            if (! autoInstall)
+                msg << " (enable auto-install to update automatically)";
+            else if (installerUrl.isEmpty())
+                msg << " (installer asset missing on release)";
             finish(msg, false, latestVersion);
             return;
         }
@@ -1818,9 +1895,32 @@ void MainComponent::triggerUpdateCheck(bool manualTrigger)
             return;
         }
 
-        status = "Update v" + latestVersion + " downloaded to: " + outFile.getFullPathName();
-        warning = false;
-        finish(status, warning, latestVersion);
+        bool launchedInstaller = false;
+#if JUCE_WINDOWS
+        const auto params = juce::String("/VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS");
+        const auto launchResult = reinterpret_cast<intptr_t>(ShellExecuteW(nullptr,
+                                                                           L"open",
+                                                                           outFile.getFullPathName().toWideCharPointer(),
+                                                                           params.toWideCharPointer(),
+                                                                           nullptr,
+                                                                           SW_SHOWNORMAL));
+        launchedInstaller = (launchResult > 32);
+#endif
+
+        if (! launchedInstaller)
+        {
+            finish("Update downloaded, but installer launch failed. File: " + outFile.getFullPathName(), true, latestVersion);
+            return;
+        }
+
+        finish("Installing update v" + latestVersion + "...", false, latestVersion);
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis == nullptr)
+                return;
+            if (auto* app = juce::JUCEApplicationBase::getInstance())
+                app->systemRequestedQuit();
+        });
     }).detach();
 }
 
@@ -2233,6 +2333,10 @@ void MainComponent::buttonClicked(juce::Button* button)
     {
         setActiveSettingsTab(1);
     }
+    else if (button == &settingsNavStartupButton)
+    {
+        setActiveSettingsTab(2);
+    }
     else if (button == &refreshAppsButton)
     {
         refreshRunningApps();
@@ -2282,18 +2386,35 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
     else if (button == &autoDownloadUpdatesToggle)
     {
-        cachedSettings.autoDownloadUpdates = autoDownloadUpdatesToggle.getToggleState();
+        cachedSettings.autoInstallUpdates = autoDownloadUpdatesToggle.getToggleState();
         saveCachedSettings();
-        if (cachedSettings.autoDownloadUpdates)
+        if (cachedSettings.autoInstallUpdates)
         {
-            setUpdateStatus("Auto-download is enabled.");
+            setUpdateStatus("Auto-install is enabled.");
             if (! hasCheckedUpdatesThisSession)
                 triggerUpdateCheck(false);
         }
         else
         {
-            setUpdateStatus("Auto-download is off.");
+            setUpdateStatus("Auto-install is off.");
         }
+    }
+    else if (button == &startWithWindowsToggle)
+    {
+        cachedSettings.startWithWindows = startWithWindowsToggle.getToggleState();
+        saveCachedSettings();
+        applyWindowsStartupSetting();
+    }
+    else if (button == &startMinimizedToggle)
+    {
+        cachedSettings.startMinimizedToTray = startMinimizedToggle.getToggleState();
+        saveCachedSettings();
+        applyWindowsStartupSetting();
+    }
+    else if (button == &followAutoEnableWindowToggle)
+    {
+        cachedSettings.followAutoEnableWindowState = followAutoEnableWindowToggle.getToggleState();
+        saveCachedSettings();
     }
     else if (button == &checkUpdatesButton)
     {
@@ -2435,41 +2556,63 @@ void MainComponent::timerCallback()
 
     if (cachedSettings.autoEnableByApp && (uiTickCount % 30 == 0))
     {
+        bool hasCondition = false;
+        const auto shouldEnable = computeAutoEnableShouldEnable(hasCondition);
         if (manualEffectsPinnedOn)
         {
             params.bypass.store(false);
             effectsToggle.setToggleState(true, juce::dontSendNotification);
             effectsToggle.setButtonText("Effects On");
             setEffectsHint({}, 0);
-            repaint();
-            return;
         }
-
-        bool hasCondition = false;
-        const auto shouldEnable = computeAutoEnableShouldEnable(hasCondition);
-        if (! hasCondition)
+        else
         {
-            // No auto-enable condition configured: do not interfere with manual control.
-            manualEffectsOverrideAutoEnable = false;
-        }
-        else if (shouldEnable)
-        {
-            if (manualEffectsOverrideAutoEnable && ! effectsToggle.getToggleState())
+            if (! hasCondition)
             {
-                setEffectsHint("Overriding auto-enable", 45);
+                // No auto-enable condition configured: do not interfere with manual control.
+                manualEffectsOverrideAutoEnable = false;
             }
-            else
+            else if (shouldEnable)
+            {
+                if (manualEffectsOverrideAutoEnable && ! effectsToggle.getToggleState())
+                {
+                    setEffectsHint("Overriding auto-enable", 45);
+                }
+                else
+                {
+                    manualEffectsOverrideAutoEnable = false;
+                    params.bypass.store(false);
+                    effectsToggle.setToggleState(true, juce::dontSendNotification);
+                    effectsToggle.setButtonText("Effects On");
+                    setEffectsHint({}, 0);
+                }
+            }
+            else if (! shouldEnable)
             {
                 manualEffectsOverrideAutoEnable = false;
-                params.bypass.store(false);
-                effectsToggle.setToggleState(true, juce::dontSendNotification);
-                effectsToggle.setButtonText("Effects On");
-                setEffectsHint({}, 0);
             }
         }
-        else if (! shouldEnable)
+
+        if (cachedSettings.followAutoEnableWindowState && hasCondition)
         {
-            manualEffectsOverrideAutoEnable = false;
+            if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+            {
+                if (shouldEnable && ! wasFollowAutoEnableMatched)
+                {
+                    window->setVisible(true);
+                    window->setMinimised(false);
+                    window->toFront(true);
+                }
+                else if (! shouldEnable && wasFollowAutoEnableMatched)
+                {
+                    window->setVisible(false);
+                }
+            }
+            wasFollowAutoEnableMatched = shouldEnable;
+        }
+        else
+        {
+            wasFollowAutoEnableMatched = false;
         }
     }
 
@@ -2483,7 +2626,7 @@ void MainComponent::timerCallback()
     if (settingsPanel != nullptr)
     {
         const auto target = settingsPanelTargetVisible ? 1.0f : 0.0f;
-        settingsPanelAlpha += (target - settingsPanelAlpha) * 0.34f;
+        settingsPanelAlpha += (target - settingsPanelAlpha) * 0.55f;
         if (std::abs(settingsPanelAlpha - target) < 0.01f)
             settingsPanelAlpha = target;
 
@@ -2562,15 +2705,6 @@ void MainComponent::paint(juce::Graphics& g)
     g.setGradientFill(cardFill);
     g.fillRoundedRectangle(card, 21.0f);
 
-    auto header = card.removeFromTop(54.0f);
-    juce::Path headerPath;
-    headerPath.addRoundedRectangle(header.getX(), header.getY(), header.getWidth(), header.getHeight() + 10.0f,
-                                   18.0f, 18.0f, true, true, false, false);
-    juce::ColourGradient headerFill(kUiPanel.withAlpha(0.95f), header.getX(), header.getY(),
-                                    kUiPanelSoft.withAlpha(0.9f), header.getX(), header.getBottom(), false);
-    g.setGradientFill(headerFill);
-    g.fillPath(headerPath);
-
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
     g.setColour(juce::Colours::white.withAlpha(0.02f));
     g.fillRoundedRectangle(chainPane, 10.0f);
@@ -2587,10 +2721,10 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(kUiAccentSoft.withAlpha(0.06f + pulse * 0.03f));
     g.drawRoundedRectangle(shell.expanded(1.8f), shellRadius + 1.5f, 1.6f);
 
-    const auto dividerY = header.getBottom() - 1.0f;
-    const auto dividerX = header.getX() + 16.0f;
-    const auto dividerW = header.getWidth() - 32.0f;
-    g.setColour(kUiAccent.withAlpha(0.12f));
+    const auto dividerY = card.getY() + 52.0f;
+    const auto dividerX = card.getX() + 14.0f;
+    const auto dividerW = card.getWidth() - 28.0f;
+    g.setColour(kUiAccent.withAlpha(0.08f));
     g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.0f);
     const auto loopWidth = dividerW + 120.0f;
     const auto phase = std::fmod(uiPulse * 80.0f, loopWidth);
@@ -2660,11 +2794,11 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(16);
+    auto area = getLocalBounds().reduced(14, 10);
     const int gap = 8;
 
-    title.setBounds(area.removeFromTop(36));
-    area.removeFromTop(14);
+    title.setBounds(area.removeFromTop(32));
+    area.removeFromTop(6);
 
     const int topWidth = area.getWidth();
     const int inputW = juce::jmax(180, static_cast<int>(topWidth * 0.24f));
@@ -2759,6 +2893,8 @@ void MainComponent::resized()
         settingsNavAutoEnableButton.setBounds(sidebar.removeFromTop(32));
         sidebar.removeFromTop(6);
         settingsNavUpdatesButton.setBounds(sidebar.removeFromTop(32));
+        sidebar.removeFromTop(6);
+        settingsNavStartupButton.setBounds(sidebar.removeFromTop(32));
 
         auto content = panel.reduced(14);
         auto contentNoFooter = content;
@@ -2791,19 +2927,33 @@ void MainComponent::resized()
         }
         else
         {
-            updatesLabel.setBounds(contentNoFooter.removeFromTop(22));
-            autoDownloadUpdatesToggle.setBounds(contentNoFooter.removeFromTop(28));
-            contentNoFooter.removeFromTop(8);
-            auto updateRow = contentNoFooter.removeFromTop(30);
-            checkUpdatesButton.setBounds(updateRow.removeFromLeft(120));
-            contentNoFooter.removeFromTop(8);
-            updateStatusLabel.setBounds(contentNoFooter.removeFromTop(56));
-            contentNoFooter.removeFromTop(10);
-            updatesLinksLabel.setBounds(contentNoFooter.removeFromTop(20));
-            auto linksRow = contentNoFooter.removeFromTop(30);
-            updatesGithubButton.setBounds(linksRow.removeFromLeft(140));
-            linksRow.removeFromLeft(gap);
-            updatesWebsiteButton.setBounds(linksRow.removeFromLeft(110));
+            if (activeSettingsTab == 1)
+            {
+                updatesLabel.setBounds(contentNoFooter.removeFromTop(22));
+                autoDownloadUpdatesToggle.setBounds(contentNoFooter.removeFromTop(28));
+                contentNoFooter.removeFromTop(8);
+                auto updateRow = contentNoFooter.removeFromTop(30);
+                checkUpdatesButton.setBounds(updateRow.removeFromLeft(120));
+                contentNoFooter.removeFromTop(8);
+                updateStatusLabel.setBounds(contentNoFooter.removeFromTop(56));
+                contentNoFooter.removeFromTop(10);
+                updatesLinksLabel.setBounds(contentNoFooter.removeFromTop(20));
+                auto linksRow = contentNoFooter.removeFromTop(30);
+                updatesGithubButton.setBounds(linksRow.removeFromLeft(140));
+                linksRow.removeFromLeft(gap);
+                updatesWebsiteButton.setBounds(linksRow.removeFromLeft(110));
+            }
+            else if (activeSettingsTab == 2)
+            {
+                startupLabel.setBounds(contentNoFooter.removeFromTop(22));
+                startWithWindowsToggle.setBounds(contentNoFooter.removeFromTop(28));
+                contentNoFooter.removeFromTop(8);
+                startMinimizedToggle.setBounds(contentNoFooter.removeFromTop(28));
+                contentNoFooter.removeFromTop(8);
+                followAutoEnableWindowToggle.setBounds(contentNoFooter.removeFromTop(28));
+                contentNoFooter.removeFromTop(10);
+                startupHintLabel.setBounds(contentNoFooter.removeFromTop(36));
+            }
         }
     }
 }

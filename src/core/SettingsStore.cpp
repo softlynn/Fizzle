@@ -30,9 +30,21 @@ EngineSettings fromVar(const juce::var& data)
         out.hasSeenFirstLaunchGuide = obj->hasProperty("hasSeenFirstLaunchGuide")
                                           ? static_cast<bool>(obj->getProperty("hasSeenFirstLaunchGuide"))
                                           : false;
-        out.autoDownloadUpdates = obj->hasProperty("autoDownloadUpdates")
-                                      ? static_cast<bool>(obj->getProperty("autoDownloadUpdates"))
-                                      : false;
+        if (obj->hasProperty("autoInstallUpdates"))
+            out.autoInstallUpdates = static_cast<bool>(obj->getProperty("autoInstallUpdates"));
+        else if (obj->hasProperty("autoDownloadUpdates"))
+            out.autoInstallUpdates = static_cast<bool>(obj->getProperty("autoDownloadUpdates"));
+        else
+            out.autoInstallUpdates = false;
+        out.startWithWindows = obj->hasProperty("startWithWindows")
+                                   ? static_cast<bool>(obj->getProperty("startWithWindows"))
+                                   : false;
+        out.startMinimizedToTray = obj->hasProperty("startMinimizedToTray")
+                                       ? static_cast<bool>(obj->getProperty("startMinimizedToTray"))
+                                       : false;
+        out.followAutoEnableWindowState = obj->hasProperty("followAutoEnableWindowState")
+                                              ? static_cast<bool>(obj->getProperty("followAutoEnableWindowState"))
+                                              : false;
         if (auto* arr = obj->getProperty("scannedVstPaths").getArray())
         {
             for (const auto& v : *arr)
@@ -61,7 +73,12 @@ juce::var toVar(const EngineSettings& settings)
     obj->setProperty("autoEnableProcessPath", settings.autoEnableProcessPath);
     obj->setProperty("lastPresetName", settings.lastPresetName);
     obj->setProperty("hasSeenFirstLaunchGuide", settings.hasSeenFirstLaunchGuide);
-    obj->setProperty("autoDownloadUpdates", settings.autoDownloadUpdates);
+    obj->setProperty("autoInstallUpdates", settings.autoInstallUpdates);
+    // Keep legacy key for backward compatibility across older builds.
+    obj->setProperty("autoDownloadUpdates", settings.autoInstallUpdates);
+    obj->setProperty("startWithWindows", settings.startWithWindows);
+    obj->setProperty("startMinimizedToTray", settings.startMinimizedToTray);
+    obj->setProperty("followAutoEnableWindowState", settings.followAutoEnableWindowState);
     juce::Array<juce::var> paths;
     for (const auto& p : settings.scannedVstPaths)
         paths.add(p);

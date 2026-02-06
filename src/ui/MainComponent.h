@@ -76,16 +76,22 @@ private:
     juce::Label settingsNavLabel;
     juce::TextButton settingsNavAutoEnableButton { "App Auto-Enable" };
     juce::TextButton settingsNavUpdatesButton { "Updates" };
+    juce::TextButton settingsNavStartupButton { "Startup" };
     juce::TextEditor appSearchEditor;
     juce::TextEditor appPathEditor;
     juce::TextButton browseAppPathButton { "Browse..." };
     juce::TextButton removeProgramButton { "Remove Selected" };
     juce::TextButton closeSettingsButton { "Close" };
-    juce::ToggleButton autoDownloadUpdatesToggle { "Auto-download new updates" };
+    juce::ToggleButton autoDownloadUpdatesToggle { "Auto-install new updates" };
     juce::TextButton checkUpdatesButton { "Check Now" };
     juce::TextButton updatesGithubButton { "Open GitHub Repo" };
     juce::TextButton updatesWebsiteButton { "Open Website" };
     juce::Label updatesLinksLabel;
+    juce::Label startupLabel;
+    juce::ToggleButton startWithWindowsToggle { "Start with Windows" };
+    juce::ToggleButton startMinimizedToggle { "Start minimized to tray" };
+    juce::ToggleButton followAutoEnableWindowToggle { "Open/close window with Program Auto-Enable" };
+    juce::Label startupHintLabel;
     juce::ListBox appListBox { "Programs", nullptr };
     juce::ListBox enabledProgramsListBox { "Enabled Programs", nullptr };
     std::unique_ptr<juce::Component> settingsPanel;
@@ -122,6 +128,7 @@ private:
     bool hasCheckedUpdatesThisSession { false };
     juce::String latestAvailableVersion;
     int activeSettingsTab { 0 };
+    bool wasFollowAutoEnableMatched { false };
     EngineSettings cachedSettings;
     std::unique_ptr<ProgramListModel> programListModel;
     std::unique_ptr<ProgramListModel> enabledProgramListModel;
@@ -189,5 +196,6 @@ private:
     void updateSettingsTabVisibility();
     void setActiveSettingsTab(int tab);
     void triggerButtonFlash(juce::Button* button);
+    void applyWindowsStartupSetting();
 };
 }

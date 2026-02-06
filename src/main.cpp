@@ -46,6 +46,7 @@ public:
 
         bool forceShow = commandLine.containsIgnoreCase("--show");
         bool forceTray = commandLine.containsIgnoreCase("--tray");
+        const bool startupTray = loaded.startMinimizedToTray;
         for (const auto& arg : juce::JUCEApplication::getCommandLineParameterArray())
         {
             if (arg.equalsIgnoreCase("--show"))
@@ -61,8 +62,9 @@ public:
         Logger::instance().log("Command line: " + commandLine);
         Logger::instance().log("Force show: " + juce::String(forceShow ? 1 : 0));
         Logger::instance().log("Force tray: " + juce::String(forceTray ? 1 : 0));
+        Logger::instance().log("Startup tray: " + juce::String(startupTray ? 1 : 0));
 
-        if (forceTray && ! forceShow)
+        if ((forceTray || startupTray) && ! forceShow)
             window->setVisible(false);
         else
         {
