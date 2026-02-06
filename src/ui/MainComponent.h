@@ -75,6 +75,7 @@ private:
     juce::Label updateStatusLabel;
     juce::Label settingsNavLabel;
     juce::TextButton settingsNavAutoEnableButton { "App Auto-Enable" };
+    juce::TextButton settingsNavUpdatesButton { "Updates" };
     juce::TextEditor appSearchEditor;
     juce::TextEditor appPathEditor;
     juce::TextButton browseAppPathButton { "Browse..." };
@@ -82,12 +83,16 @@ private:
     juce::TextButton closeSettingsButton { "Close" };
     juce::ToggleButton autoDownloadUpdatesToggle { "Auto-download new updates" };
     juce::TextButton checkUpdatesButton { "Check Now" };
+    juce::TextButton updatesGithubButton { "Open GitHub Repo" };
+    juce::TextButton updatesWebsiteButton { "Open Website" };
+    juce::Label updatesLinksLabel;
     juce::ListBox appListBox { "Programs", nullptr };
     juce::ListBox enabledProgramsListBox { "Enabled Programs", nullptr };
     std::unique_ptr<juce::Component> settingsPanel;
     juce::Slider outputGain;
     juce::Label outputGainLabel;
     juce::TextButton outputGainResetButton { "Reset" };
+    juce::Label versionLabel;
 
     MeterComponent meterIn;
     MeterComponent meterOut;
@@ -96,6 +101,8 @@ private:
     std::unique_ptr<juce::DocumentWindow> pluginEditorWindow;
     float uiPulse { 0.0f };
     float settingsPanelAlpha { 0.0f };
+    float savePresetFlashAlpha { 0.0f };
+    float aboutFlashAlpha { 0.0f };
     bool scannedOnVisible { false };
     bool settingsPanelTargetVisible { false };
     juce::String currentPresetName { "Default" };
@@ -114,6 +121,7 @@ private:
     std::atomic<bool> updateCheckInFlight { false };
     bool hasCheckedUpdatesThisSession { false };
     juce::String latestAvailableVersion;
+    int activeSettingsTab { 0 };
     EngineSettings cachedSettings;
     std::unique_ptr<ProgramListModel> programListModel;
     std::unique_ptr<ProgramListModel> enabledProgramListModel;
@@ -129,6 +137,8 @@ private:
         juce::Image icon;
     };
     std::vector<RunningAppEntry> runningApps;
+    juce::StringArray outputDeviceRealNames;
+    juce::Image appLogo;
 
     void buttonClicked(juce::Button* button) override;
     void comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged) override;
@@ -156,6 +166,9 @@ private:
     void setSettingsPanelVisible(bool visible);
     juce::Array<juce::File> getDefaultVst3Folders() const;
     juce::String findOutputByMatch(const juce::StringArray& candidates) const;
+    juce::String getSelectedOutputDeviceName() const;
+    juce::String getDisplayOutputName(const juce::String& realOutputName) const;
+    bool isVirtualMicName(const juce::String& outputName) const;
     void startRowDrag(int row);
     void dragHoverRow(int row);
     void finishRowDrag(int row);
@@ -173,5 +186,8 @@ private:
     void loadPresetByName(const juce::String& name);
     void setUpdateStatus(const juce::String& text, bool warning = false);
     void triggerUpdateCheck(bool manualTrigger);
+    void updateSettingsTabVisibility();
+    void setActiveSettingsTab(int tab);
+    void triggerButtonFlash(juce::Button* button);
 };
 }

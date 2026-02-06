@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "Theme.h"
 #include "../core/Logger.h"
+#include <BinaryData.h>
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -23,6 +24,9 @@ const juce::Colour kUiTextMuted(0xffa8bbdd);
 const juce::Colour kUiAccent(0xff6dbbff);
 const juce::Colour kUiAccentSoft(0xffa4ddff);
 const juce::Colour kUiMint(0xff9af7d8);
+const juce::Colour kUiSalmon(0xffff8d92);
+const juce::String kGithubRepoUrl("https://github.com/softlynn/Fizzle");
+const juce::String kWebsiteUrl("https://softlynn.github.io/Fizzle/");
 
 juce::String normalizeVersionTag(juce::String value)
 {
@@ -608,6 +612,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 {
     static ModernLookAndFeel modern;
     setLookAndFeel(&modern);
+    appLogo = juce::ImageFileFormat::loadFrom(BinaryData::app_png, BinaryData::app_pngSize);
 
     title.setText("Fizzle", juce::dontSendNotification);
     juce::Font titleFont(juce::FontOptions(30.0f, juce::Font::bold));
@@ -616,7 +621,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     addAndMakeVisible(title);
 
     inputLabel.setText("Input Mic", juce::dontSendNotification);
-    outputLabel.setText("Virtual Mic Output", juce::dontSendNotification);
+    outputLabel.setText("Fizzle Mic Output", juce::dontSendNotification);
     bufferLabel.setText("Buffer Size", juce::dontSendNotification);
     sampleRateLabel.setText("Sample Rate", juce::dontSendNotification);
     sampleRateValueLabel.setText("48.0 kHz", juce::dontSendNotification);
@@ -626,6 +631,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     appListLabel.setText("Programs", juce::dontSendNotification);
     enabledProgramsLabel.setText("Enabled Programs", juce::dontSendNotification);
     updatesLabel.setText("Updates", juce::dontSendNotification);
+    updatesLinksLabel.setText("Quick links", juce::dontSendNotification);
+    updatesLinksLabel.setColour(juce::Label::textColourId, kUiTextMuted);
     updateStatusLabel.setText("Auto-download is off.", juce::dontSendNotification);
     updateStatusLabel.setColour(juce::Label::textColourId, kUiTextMuted);
     updateStatusLabel.setJustificationType(juce::Justification::topLeft);
@@ -638,8 +645,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     juce::Font sectionLabelFont(juce::FontOptions(14.0f, juce::Font::bold));
     sectionLabelFont.setExtraKerningFactor(0.01f);
     updatesLabel.setFont(sectionLabelFont);
+    updatesLinksLabel.setFont(juce::FontOptions(12.5f));
     currentPresetLabel.setText("Current: Default", juce::dontSendNotification);
-    virtualMicStatusLabel.setText("Virtual Mic: not routed", juce::dontSendNotification);
+    virtualMicStatusLabel.setText("Fizzle Mic: not routed", juce::dontSendNotification);
     effectsHintLabel.setText({}, juce::dontSendNotification);
     effectsHintLabel.setColour(juce::Label::textColourId, kUiAccentSoft);
     juce::Font hintStatusFont(juce::FontOptions(12.5f, juce::Font::plain));
@@ -664,6 +672,14 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     juce::Font statusFont(juce::FontOptions(12.0f));
     statusFont.setExtraKerningFactor(0.01f);
     updateStatusLabel.setFont(statusFont);
+
+    versionLabel.setText("v" + juce::String(FIZZLE_VERSION), juce::dontSendNotification);
+    versionLabel.setJustificationType(juce::Justification::centredRight);
+    versionLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.18f));
+    juce::Font versionFont(juce::FontOptions(11.0f));
+    versionFont.setExtraKerningFactor(0.07f);
+    versionLabel.setFont(versionFont);
+    addAndMakeVisible(versionLabel);
 
     for (auto* c : { &inputBox, &outputBox, &bufferBox, &presetBox, &vstAvailableBox })
     {
@@ -710,8 +726,14 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     removeProgramButton.setComponentID("remove");
     checkUpdatesButton.setButtonText("Check Now");
     checkUpdatesButton.setComponentID("refresh");
-    settingsNavAutoEnableButton.setEnabled(false);
+    updatesGithubButton.setButtonText("GitHub Repo");
+    updatesWebsiteButton.setButtonText("Website");
+    updatesGithubButton.setComponentID("about");
+    updatesWebsiteButton.setComponentID("about");
+    settingsNavAutoEnableButton.setClickingTogglesState(true);
+    settingsNavUpdatesButton.setClickingTogglesState(true);
     settingsNavAutoEnableButton.setToggleState(true, juce::dontSendNotification);
+    settingsNavUpdatesButton.setToggleState(false, juce::dontSendNotification);
     autoEnableToggle.setButtonText("Auto Enable by Program");
     autoDownloadUpdatesToggle.setButtonText("Auto-download new updates");
     appSearchEditor.setTextToShowWhenEmpty("Type to search programs...", juce::Colour(0xff9aa7b6));
@@ -736,6 +758,10 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     refreshAppsButton.addListener(this);
     autoDownloadUpdatesToggle.addListener(this);
     checkUpdatesButton.addListener(this);
+    settingsNavAutoEnableButton.addListener(this);
+    settingsNavUpdatesButton.addListener(this);
+    updatesGithubButton.addListener(this);
+    updatesWebsiteButton.addListener(this);
 
     programListModel = std::make_unique<ProgramListModel>();
     programListModel->rowCount = [this]() { return static_cast<int>(filteredProgramIndices.size()); };
@@ -809,6 +835,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel = std::make_unique<SettingsOverlay>();
     settingsPanel->addAndMakeVisible(settingsNavLabel);
     settingsPanel->addAndMakeVisible(settingsNavAutoEnableButton);
+    settingsPanel->addAndMakeVisible(settingsNavUpdatesButton);
     settingsPanel->addAndMakeVisible(appEnableLabel);
     settingsPanel->addAndMakeVisible(appSearchLabel);
     settingsPanel->addAndMakeVisible(appListLabel);
@@ -824,6 +851,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(updatesLabel);
     settingsPanel->addAndMakeVisible(autoDownloadUpdatesToggle);
     settingsPanel->addAndMakeVisible(checkUpdatesButton);
+    settingsPanel->addAndMakeVisible(updatesLinksLabel);
+    settingsPanel->addAndMakeVisible(updatesGithubButton);
+    settingsPanel->addAndMakeVisible(updatesWebsiteButton);
     settingsPanel->addAndMakeVisible(updateStatusLabel);
     settingsPanel->addAndMakeVisible(closeSettingsButton);
 
@@ -833,6 +863,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->setAlpha(0.0f);
     settingsPanelTargetVisible = false;
     settingsPanelAlpha = 0.0f;
+    activeSettingsTab = 0;
 
     outputGainLabel.setText("Virtual Mic Gain", juce::dontSendNotification);
     addAndMakeVisible(outputGainLabel);
@@ -873,6 +904,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     autoEnableToggle.setToggleState(cachedSettings.autoEnableByApp, juce::dontSendNotification);
     autoDownloadUpdatesToggle.setToggleState(cachedSettings.autoDownloadUpdates, juce::dontSendNotification);
     setUpdateStatus(cachedSettings.autoDownloadUpdates ? "Auto-download is enabled." : "Auto-download is off.");
+    setActiveSettingsTab(0);
     refreshRunningApps();
     refreshEnabledProgramsList();
     if (cachedSettings.autoEnableProcessPath.isNotEmpty())
@@ -900,7 +932,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
                 "Welcome to Fizzle!\n\n"
                 "Quick setup:\n"
                 "1) Select your microphone in Input Mic.\n"
-                "2) Select CABLE Input (VB-Audio Virtual Cable) in Virtual Mic Output.\n"
+                "2) Select Fizzle Mic (VB-Cable) in Fizzle Mic Output.\n"
                 "3) Turn Effects On.\n"
                 "4) Pick a VST3 from the detected list to add it.\n"
                 "5) Use Listen if you want local monitoring.\n\n"
@@ -1314,10 +1346,67 @@ void MainComponent::setSettingsPanelVisible(bool visible)
     {
         refreshRunningApps();
         refreshProgramsList();
+        updateSettingsTabVisibility();
         settingsPanel->setVisible(true);
         settingsPanel->toFront(true);
     }
     settingsPanel->setInterceptsMouseClicks(visible, visible);
+}
+
+void MainComponent::updateSettingsTabVisibility()
+{
+    const bool autoEnableTab = (activeSettingsTab == 0);
+    auto setVisible = [](juce::Component& component, bool visible)
+    {
+        component.setVisible(visible);
+        component.setEnabled(visible);
+    };
+
+    for (auto* c : { static_cast<juce::Component*>(&appEnableLabel),
+                     static_cast<juce::Component*>(&appSearchLabel),
+                     static_cast<juce::Component*>(&appListLabel),
+                     static_cast<juce::Component*>(&enabledProgramsLabel),
+                     static_cast<juce::Component*>(&appSearchEditor),
+                     static_cast<juce::Component*>(&autoEnableToggle),
+                     static_cast<juce::Component*>(&refreshAppsButton),
+                     static_cast<juce::Component*>(&appListBox),
+                     static_cast<juce::Component*>(&enabledProgramsListBox),
+                     static_cast<juce::Component*>(&appPathEditor),
+                     static_cast<juce::Component*>(&browseAppPathButton),
+                     static_cast<juce::Component*>(&removeProgramButton) })
+    {
+        if (c != nullptr)
+            setVisible(*c, autoEnableTab);
+    }
+
+    for (auto* c : { static_cast<juce::Component*>(&updatesLabel),
+                     static_cast<juce::Component*>(&autoDownloadUpdatesToggle),
+                     static_cast<juce::Component*>(&checkUpdatesButton),
+                     static_cast<juce::Component*>(&updateStatusLabel),
+                     static_cast<juce::Component*>(&updatesLinksLabel),
+                     static_cast<juce::Component*>(&updatesGithubButton),
+                     static_cast<juce::Component*>(&updatesWebsiteButton) })
+    {
+        if (c != nullptr)
+            setVisible(*c, ! autoEnableTab);
+    }
+}
+
+void MainComponent::setActiveSettingsTab(int tab)
+{
+    activeSettingsTab = juce::jlimit(0, 1, tab);
+    settingsNavAutoEnableButton.setToggleState(activeSettingsTab == 0, juce::dontSendNotification);
+    settingsNavUpdatesButton.setToggleState(activeSettingsTab == 1, juce::dontSendNotification);
+    updateSettingsTabVisibility();
+    resized();
+}
+
+void MainComponent::triggerButtonFlash(juce::Button* button)
+{
+    if (button == &savePresetButton)
+        savePresetFlashAlpha = 1.0f;
+    else if (button == &aboutButton)
+        aboutFlashAlpha = 1.0f;
 }
 
 void MainComponent::refreshKnownPlugins()
@@ -1343,6 +1432,7 @@ void MainComponent::loadDeviceLists()
     const juce::ScopedValueSetter<bool> svs(suppressControlCallbacks, true);
     inputBox.clear();
     outputBox.clear();
+    outputDeviceRealNames.clear();
 
     auto* currentType = engine.getDeviceManager().getCurrentDeviceTypeObject();
     if (currentType == nullptr)
@@ -1357,7 +1447,10 @@ void MainComponent::loadDeviceLists()
 
     id = 1;
     for (const auto& name : outputNames)
-        outputBox.addItem(name, id++);
+    {
+        outputDeviceRealNames.add(name);
+        outputBox.addItem(getDisplayOutputName(name), id++);
+    }
 
     auto current = engine.currentSettings();
     cachedSettings.inputDeviceName = current.inputDeviceName;
@@ -1366,7 +1459,11 @@ void MainComponent::loadDeviceLists()
     if (current.inputDeviceName.isNotEmpty())
         inputBox.setSelectedId(inputNames.indexOf(current.inputDeviceName) + 1, juce::dontSendNotification);
     if (current.outputDeviceName.isNotEmpty())
-        outputBox.setSelectedId(outputNames.indexOf(current.outputDeviceName) + 1, juce::dontSendNotification);
+    {
+        const auto outputIndex = outputDeviceRealNames.indexOf(current.outputDeviceName);
+        if (outputIndex >= 0)
+            outputBox.setSelectedId(outputIndex + 1, juce::dontSendNotification);
+    }
 }
 
 void MainComponent::refreshPresets()
@@ -1398,7 +1495,7 @@ void MainComponent::applySettingsFromControls()
     auto s = engine.currentSettings();
     const auto previous = s;
     s.inputDeviceName = inputBox.getText();
-    s.outputDeviceName = outputBox.getText();
+    s.outputDeviceName = getSelectedOutputDeviceName();
     const auto requestedBuffer = bufferBox.getText().getIntValue();
     s.bufferSize = requestedBuffer > 0 ? requestedBuffer : 256;
 
@@ -1433,9 +1530,9 @@ juce::String MainComponent::findOutputByMatch(const juce::StringArray& candidate
 {
     int bestIndex = -1;
     int bestScore = -1;
-    for (int i = 0; i < outputBox.getNumItems(); ++i)
+    for (int i = 0; i < outputDeviceRealNames.size(); ++i)
     {
-        const auto itemText = outputBox.getItemText(i).toLowerCase();
+        const auto itemText = outputDeviceRealNames[i].toLowerCase();
         int score = 0;
         for (const auto& c : candidates)
             if (itemText.contains(c.toLowerCase())) score += 2;
@@ -1445,7 +1542,31 @@ juce::String MainComponent::findOutputByMatch(const juce::StringArray& candidate
             bestIndex = i;
         }
     }
-    return (bestIndex >= 0 && bestScore > 0) ? outputBox.getItemText(bestIndex) : juce::String{};
+    return (bestIndex >= 0 && bestScore > 0) ? outputDeviceRealNames[bestIndex] : juce::String{};
+}
+
+juce::String MainComponent::getSelectedOutputDeviceName() const
+{
+    const auto id = outputBox.getSelectedId();
+    const auto index = id - 1;
+    if (juce::isPositiveAndBelow(index, outputDeviceRealNames.size()))
+        return outputDeviceRealNames[index];
+    return outputBox.getText();
+}
+
+bool MainComponent::isVirtualMicName(const juce::String& outputName) const
+{
+    return outputName.containsIgnoreCase("vb")
+        || outputName.containsIgnoreCase("cable")
+        || outputName.containsIgnoreCase("virtual")
+        || outputName.containsIgnoreCase("fizzle mic");
+}
+
+juce::String MainComponent::getDisplayOutputName(const juce::String& realOutputName) const
+{
+    if (isVirtualMicName(realOutputName))
+        return "Fizzle Mic";
+    return realOutputName;
 }
 
 void MainComponent::rowOpenEditor(int row)
@@ -1847,7 +1968,13 @@ void MainComponent::loadPresetByName(const juce::String& name)
             engineSettings.preferredSampleRate = preset->engine.preferredSampleRate;
 
         inputBox.setText(engineSettings.inputDeviceName, juce::dontSendNotification);
-        outputBox.setText(engineSettings.outputDeviceName, juce::dontSendNotification);
+        {
+            const auto outputIndex = outputDeviceRealNames.indexOf(engineSettings.outputDeviceName);
+            if (outputIndex >= 0)
+                outputBox.setSelectedId(outputIndex + 1, juce::dontSendNotification);
+            else
+                outputBox.setText(getDisplayOutputName(engineSettings.outputDeviceName), juce::dontSendNotification);
+        }
         if (engineSettings.bufferSize == 128) bufferBox.setSelectedId(1, juce::dontSendNotification);
         else if (engineSettings.bufferSize == 512) bufferBox.setSelectedId(3, juce::dontSendNotification);
         else bufferBox.setSelectedId(2, juce::dontSendNotification);
@@ -1921,7 +2048,22 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
     else if (button == &aboutButton)
     {
-        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "About Fizzle", "Fizzle " + juce::String(FIZZLE_VERSION));
+        triggerButtonFlash(button);
+        auto* aboutPrompt = new juce::AlertWindow("About Fizzle",
+                                                  "Fizzle " + juce::String(FIZZLE_VERSION)
+                                                    + "\n\nGitHub: " + kGithubRepoUrl
+                                                    + "\nWebsite: " + kWebsiteUrl,
+                                                  juce::AlertWindow::InfoIcon);
+        aboutPrompt->addButton("Open GitHub", 1);
+        aboutPrompt->addButton("Open Website", 2);
+        aboutPrompt->addButton("Close", 0);
+        aboutPrompt->enterModalState(true, juce::ModalCallbackFunction::create([](int result)
+        {
+            if (result == 1)
+                juce::URL(kGithubRepoUrl).launchInDefaultBrowser();
+            else if (result == 2)
+                juce::URL(kWebsiteUrl).launchInDefaultBrowser();
+        }), true);
     }
     else if (button == &routeSpeakersButton)
     {
@@ -1930,7 +2072,7 @@ void MainComponent::buttonClicked(juce::Button* button)
             const auto monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "realtek", "output" });
             if (monitor.isEmpty())
                 return;
-            if (monitor == outputBox.getText())
+            if (monitor == getSelectedOutputDeviceName())
             {
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
                                                        "Listen Output",
@@ -1969,6 +2111,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
     else if (button == &savePresetButton)
     {
+        triggerButtonFlash(button);
         auto* prompt = new juce::AlertWindow("Save Preset", "Preset name:", juce::AlertWindow::NoIcon);
         prompt->addTextEditor("name", currentPresetName, "Name:");
         prompt->addButton("Save", 1);
@@ -2082,6 +2225,14 @@ void MainComponent::buttonClicked(juce::Button* button)
     {
         setSettingsPanelVisible(! settingsPanelTargetVisible);
     }
+    else if (button == &settingsNavAutoEnableButton)
+    {
+        setActiveSettingsTab(0);
+    }
+    else if (button == &settingsNavUpdatesButton)
+    {
+        setActiveSettingsTab(1);
+    }
     else if (button == &refreshAppsButton)
     {
         refreshRunningApps();
@@ -2147,6 +2298,14 @@ void MainComponent::buttonClicked(juce::Button* button)
     else if (button == &checkUpdatesButton)
     {
         triggerUpdateCheck(true);
+    }
+    else if (button == &updatesGithubButton)
+    {
+        juce::URL(kGithubRepoUrl).launchInDefaultBrowser();
+    }
+    else if (button == &updatesWebsiteButton)
+    {
+        juce::URL(kWebsiteUrl).launchInDefaultBrowser();
     }
 }
 
@@ -2270,9 +2429,9 @@ void MainComponent::timerCallback()
     meterIn.setLevel(d.inputLevel);
     meterOut.setLevel(d.outputLevel);
     sampleRateValueLabel.setText(juce::String(d.sampleRate / 1000.0, 1) + " kHz", juce::dontSendNotification);
-    const auto out = outputBox.getText();
-    const bool virt = out.containsIgnoreCase("vb") || out.containsIgnoreCase("cable") || out.containsIgnoreCase("virtual");
-    virtualMicStatusLabel.setText(virt ? "Virtual Mic: routed" : "Virtual Mic: not routed", juce::dontSendNotification);
+    const auto out = getSelectedOutputDeviceName();
+    const bool virt = isVirtualMicName(out);
+    virtualMicStatusLabel.setText(virt ? "Fizzle Mic: routed" : "Fizzle Mic: not routed", juce::dontSendNotification);
 
     if (cachedSettings.autoEnableByApp && (uiTickCount % 30 == 0))
     {
@@ -2324,7 +2483,7 @@ void MainComponent::timerCallback()
     if (settingsPanel != nullptr)
     {
         const auto target = settingsPanelTargetVisible ? 1.0f : 0.0f;
-        settingsPanelAlpha += (target - settingsPanelAlpha) * 0.22f;
+        settingsPanelAlpha += (target - settingsPanelAlpha) * 0.34f;
         if (std::abs(settingsPanelAlpha - target) < 0.01f)
             settingsPanelAlpha = target;
 
@@ -2334,6 +2493,13 @@ void MainComponent::timerCallback()
         else if (settingsPanelTargetVisible && ! settingsPanel->isVisible())
             settingsPanel->setVisible(true);
     }
+
+    savePresetFlashAlpha *= 0.84f;
+    aboutFlashAlpha *= 0.84f;
+    if (savePresetFlashAlpha < 0.01f)
+        savePresetFlashAlpha = 0.0f;
+    if (aboutFlashAlpha < 0.01f)
+        aboutFlashAlpha = 0.0f;
 
     repaint();
 }
@@ -2441,10 +2607,27 @@ void MainComponent::paint(juce::Graphics& g)
     g.drawLine(micIcon.getCentreX(), micIcon.getY() + 10.2f, micIcon.getCentreX(), micIcon.getBottom() - 1.8f, 1.2f);
     g.drawLine(micIcon.getCentreX() - 2.4f, micIcon.getBottom() - 1.8f, micIcon.getCentreX() + 2.4f, micIcon.getBottom() - 1.8f, 1.2f);
 
-    const auto cableIcon = outputIconBounds.toFloat();
-    g.drawLine(cableIcon.getX() + 1.8f, cableIcon.getCentreY(), cableIcon.getRight() - 6.4f, cableIcon.getCentreY(), 1.2f);
-    g.drawRoundedRectangle(cableIcon.getRight() - 6.2f, cableIcon.getCentreY() - 3.0f, 4.8f, 6.0f, 1.2f, 1.2f);
-    g.fillEllipse(cableIcon.getX() + 1.1f, cableIcon.getCentreY() - 1.3f, 2.6f, 2.6f);
+    auto fizzleMicIcon = outputIconBounds.toFloat().reduced(0.4f);
+    g.setColour(kUiAccent.withAlpha(0.18f));
+    g.fillEllipse(fizzleMicIcon.expanded(1.0f));
+    g.setColour(kUiAccentSoft.withAlpha(0.4f));
+    g.drawEllipse(fizzleMicIcon.expanded(1.0f), 1.0f);
+    if (appLogo.isValid())
+    {
+        g.drawImageWithin(appLogo,
+                          juce::roundToInt(fizzleMicIcon.getX()),
+                          juce::roundToInt(fizzleMicIcon.getY()),
+                          juce::roundToInt(fizzleMicIcon.getWidth()),
+                          juce::roundToInt(fizzleMicIcon.getHeight()),
+                          juce::RectanglePlacement::centred);
+    }
+    else
+    {
+        g.setColour(kUiText);
+        g.drawLine(fizzleMicIcon.getX() + 2.0f, fizzleMicIcon.getCentreY(), fizzleMicIcon.getRight() - 6.0f, fizzleMicIcon.getCentreY(), 1.2f);
+        g.drawRoundedRectangle(fizzleMicIcon.getRight() - 5.8f, fizzleMicIcon.getCentreY() - 3.0f, 4.6f, 6.0f, 1.2f, 1.2f);
+        g.fillEllipse(fizzleMicIcon.getX() + 1.0f, fizzleMicIcon.getCentreY() - 1.3f, 2.5f, 2.5f);
+    }
 
     if (engine.isListenEnabled())
     {
@@ -2455,6 +2638,19 @@ void MainComponent::paint(juce::Graphics& g)
         g.setColour(kUiMint.withAlpha(0.35f));
         g.drawEllipse(led.expanded(2.0f), 1.3f);
     }
+
+    auto drawFlash = [&g](const juce::Button& button, float alpha)
+    {
+        if (alpha <= 0.0f)
+            return;
+        auto bounds = button.getBounds().toFloat().expanded(1.8f, 1.2f);
+        g.setColour(kUiSalmon.withAlpha(0.10f * alpha));
+        g.fillRoundedRectangle(bounds, 12.0f);
+        g.setColour(kUiSalmon.withAlpha(0.24f * alpha));
+        g.drawRoundedRectangle(bounds, 12.0f, 1.2f);
+    };
+    drawFlash(savePresetButton, savePresetFlashAlpha);
+    drawFlash(aboutButton, aboutFlashAlpha);
 
     if (settingsPanel != nullptr && settingsPanel->isVisible())
     {
@@ -2484,7 +2680,7 @@ void MainComponent::resized()
     labels.removeFromLeft(gap);
     auto outputLabelArea = labels.removeFromLeft(outputW);
     outputLabel.setBounds(outputLabelArea.withTrimmedLeft(34));
-    outputIconBounds = juce::Rectangle<int>(outputLabelArea.getX() + 8, outputLabelArea.getY() + 3, 16, 14);
+    outputIconBounds = juce::Rectangle<int>(outputLabelArea.getX() + 8, outputLabelArea.getY() + 2, 16, 16);
     labels.removeFromLeft(gap);
     bufferLabel.setBounds(labels.removeFromLeft(bufferW)); labels.removeFromLeft(gap);
     sampleRateLabel.setBounds(labels.removeFromLeft(sampleW)); labels.removeFromLeft(gap);
@@ -2549,6 +2745,9 @@ void MainComponent::resized()
 
     area.removeFromTop(gap);
     diagnostics.setBounds(area);
+    auto versionBounds = diagnostics.getBounds().removeFromBottom(18).removeFromRight(86);
+    versionLabel.setBounds(versionBounds.translated(-4, -2));
+    versionLabel.toFront(false);
 
     if (settingsPanel != nullptr)
     {
@@ -2558,39 +2757,54 @@ void MainComponent::resized()
         settingsNavLabel.setBounds(sidebar.removeFromTop(24));
         sidebar.removeFromTop(8);
         settingsNavAutoEnableButton.setBounds(sidebar.removeFromTop(32));
+        sidebar.removeFromTop(6);
+        settingsNavUpdatesButton.setBounds(sidebar.removeFromTop(32));
 
         auto content = panel.reduced(14);
-        appEnableLabel.setBounds(content.removeFromTop(22));
-        autoEnableToggle.setBounds(content.removeFromTop(28));
-        content.removeFromTop(8);
-        appSearchLabel.setBounds(content.removeFromTop(20));
-        appSearchEditor.setBounds(content.removeFromTop(28));
-        content.removeFromTop(8);
-        appListLabel.setBounds(content.removeFromTop(20));
-        appListBox.setBounds(content.removeFromTop(120));
-        content.removeFromTop(8);
-        enabledProgramsLabel.setBounds(content.removeFromTop(20));
-        enabledProgramsListBox.setBounds(content.removeFromTop(94));
-        content.removeFromTop(8);
-        auto buttonsRow = content.removeFromTop(28);
-        refreshAppsButton.setBounds(buttonsRow.removeFromLeft(120));
-        buttonsRow.removeFromLeft(gap);
-        removeProgramButton.setBounds(buttonsRow.removeFromLeft(138));
-        content.removeFromTop(8);
-        appPathEditor.setBounds(content.removeFromTop(28));
-        content.removeFromTop(8);
-        auto pathRow = content.removeFromTop(30);
-        browseAppPathButton.setBounds(pathRow.removeFromLeft(120));
-        content.removeFromTop(10);
-        updatesLabel.setBounds(content.removeFromTop(20));
-        autoDownloadUpdatesToggle.setBounds(content.removeFromTop(28));
-        content.removeFromTop(6);
-        auto updateRow = content.removeFromTop(28);
-        checkUpdatesButton.setBounds(updateRow.removeFromLeft(120));
-        content.removeFromTop(6);
-        updateStatusLabel.setBounds(content.removeFromTop(42));
-        content.removeFromTop(8);
-        closeSettingsButton.setBounds(content.removeFromTop(30).removeFromLeft(90));
+        auto contentNoFooter = content;
+        auto footer = contentNoFooter.removeFromBottom(34);
+        closeSettingsButton.setBounds(footer.removeFromLeft(92));
+
+        if (activeSettingsTab == 0)
+        {
+            appEnableLabel.setBounds(contentNoFooter.removeFromTop(22));
+            autoEnableToggle.setBounds(contentNoFooter.removeFromTop(28));
+            contentNoFooter.removeFromTop(8);
+            appSearchLabel.setBounds(contentNoFooter.removeFromTop(20));
+            appSearchEditor.setBounds(contentNoFooter.removeFromTop(28));
+            contentNoFooter.removeFromTop(8);
+            appListLabel.setBounds(contentNoFooter.removeFromTop(20));
+            appListBox.setBounds(contentNoFooter.removeFromTop(120));
+            contentNoFooter.removeFromTop(8);
+            enabledProgramsLabel.setBounds(contentNoFooter.removeFromTop(20));
+            enabledProgramsListBox.setBounds(contentNoFooter.removeFromTop(94));
+            contentNoFooter.removeFromTop(8);
+            auto buttonsRow = contentNoFooter.removeFromTop(28);
+            refreshAppsButton.setBounds(buttonsRow.removeFromLeft(120));
+            buttonsRow.removeFromLeft(gap);
+            removeProgramButton.setBounds(buttonsRow.removeFromLeft(138));
+            contentNoFooter.removeFromTop(8);
+            appPathEditor.setBounds(contentNoFooter.removeFromTop(28));
+            contentNoFooter.removeFromTop(8);
+            auto pathRow = contentNoFooter.removeFromTop(30);
+            browseAppPathButton.setBounds(pathRow.removeFromLeft(120));
+        }
+        else
+        {
+            updatesLabel.setBounds(contentNoFooter.removeFromTop(22));
+            autoDownloadUpdatesToggle.setBounds(contentNoFooter.removeFromTop(28));
+            contentNoFooter.removeFromTop(8);
+            auto updateRow = contentNoFooter.removeFromTop(30);
+            checkUpdatesButton.setBounds(updateRow.removeFromLeft(120));
+            contentNoFooter.removeFromTop(8);
+            updateStatusLabel.setBounds(contentNoFooter.removeFromTop(56));
+            contentNoFooter.removeFromTop(10);
+            updatesLinksLabel.setBounds(contentNoFooter.removeFromTop(20));
+            auto linksRow = contentNoFooter.removeFromTop(30);
+            updatesGithubButton.setBounds(linksRow.removeFromLeft(140));
+            linksRow.removeFromLeft(gap);
+            updatesWebsiteButton.setBounds(linksRow.removeFromLeft(110));
+        }
     }
 }
 }
