@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.5 - In-Depth Header Integration
+
+### Fixed
+- Replaced window titlebar rendering with an in-app integrated header layer.
+- Added custom in-header window controls (min/max/close) with drag and double-click maximize behavior.
+- Repositioned animated header line into a dedicated visible header lane.
+- Removed residual tray popup white border by forcing opaque full-background painting.
+
 ## v0.1.4 - Header/Tray Fix Follow-up
 
 ### Fixed

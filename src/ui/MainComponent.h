@@ -23,6 +23,10 @@ public:
 
     void resized() override;
     void paint(juce::Graphics& g) override;
+    void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
+    void mouseDoubleClick(const juce::MouseEvent& e) override;
 
     void refreshPresets();
     void onWindowVisible();
@@ -64,6 +68,9 @@ private:
     juce::TextButton restartButton;
     juce::TextButton aboutButton;
     juce::TextButton settingsButton { "Settings" };
+    juce::TextButton windowMinButton;
+    juce::TextButton windowMaxButton;
+    juce::TextButton windowCloseButton;
     juce::ToggleButton toneButton;
     juce::ToggleButton autoEnableToggle { "Auto Enable by App" };
     juce::TextButton refreshAppsButton { "Refresh" };
@@ -135,8 +142,14 @@ private:
     std::vector<int> filteredProgramIndices;
     int selectedProgramRow { -1 };
     int selectedEnabledProgramRow { -1 };
+    juce::Rectangle<int> headerBounds;
+    juce::Rectangle<int> headerLogoBounds;
     juce::Rectangle<int> inputIconBounds;
     juce::Rectangle<int> outputIconBounds;
+    juce::ComponentDragger windowDragger;
+    bool draggingWindow { false };
+    bool windowMaximized { false };
+    juce::Rectangle<int> windowRestoreBounds;
     struct RunningAppEntry
     {
         juce::String name;
@@ -197,5 +210,6 @@ private:
     void setActiveSettingsTab(int tab);
     void triggerButtonFlash(juce::Button* button);
     void applyWindowsStartupSetting();
+    void toggleWindowMaximize();
 };
 }

@@ -10,14 +10,12 @@ class MainWindow : public juce::DocumentWindow
 {
 public:
     explicit MainWindow(std::unique_ptr<MainComponent> content);
-    ~MainWindow() override;
+    ~MainWindow() override = default;
     MainComponent* getMainComponent() const;
     void closeButtonPressed() override;
     juce::BorderSize<int> getContentComponentBorder() const override;
 
 private:
-    class WindowLookAndFeel;
     std::unique_ptr<MainComponent> ownedContent;
-    std::unique_ptr<WindowLookAndFeel> lookAndFeel;
 };
 }

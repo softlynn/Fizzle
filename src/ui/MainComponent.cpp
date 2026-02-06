@@ -110,6 +110,25 @@ public:
                               bool isMouseOver,
                               bool isButtonDown) override
     {
+        const auto id = button.getComponentID();
+        if (id.startsWith("win-"))
+        {
+            auto b = button.getLocalBounds().toFloat().reduced(1.4f);
+            auto fill = (id == "win-close") ? kUiSalmon : kUiSalmon.brighter(0.16f);
+            if (isMouseOver) fill = fill.brighter(0.18f);
+            if (isButtonDown) fill = fill.darker(0.2f);
+            if (isMouseOver)
+            {
+                g.setColour(fill.withAlpha(isButtonDown ? 0.38f : 0.24f));
+                g.fillEllipse(b.expanded(1.8f));
+            }
+            g.setColour(fill.withAlpha(0.97f));
+            g.fillEllipse(b);
+            g.setColour(juce::Colours::white.withAlpha(isMouseOver ? 0.72f : 0.52f));
+            g.drawEllipse(b, isButtonDown ? 1.8f : 1.2f);
+            return;
+        }
+
         auto c = kUiPanel.withAlpha(0.94f);
         if (button.getToggleState())
             c = kUiAccent.withAlpha(0.32f);
@@ -132,24 +151,32 @@ public:
                         bool shouldDrawButtonAsDown) override
     {
         juce::ignoreUnused(shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+        const auto id = button.getComponentID();
         auto bounds = button.getLocalBounds();
         auto r = bounds.reduced(12, 0);
         auto icon = juce::Rectangle<float>(static_cast<float>(r.getX()),
                                            static_cast<float>(bounds.getCentreY() - 6),
                                            12.0f,
                                            12.0f);
+        if (id.startsWith("win-"))
+            icon = juce::Rectangle<float>(static_cast<float>(bounds.getCentreX() - 6),
+                                          static_cast<float>(bounds.getCentreY() - 6),
+                                          12.0f,
+                                          12.0f);
         r.removeFromLeft(18);
 
         constexpr float stroke = 1.45f;
 
-        g.setColour(button.findColour(juce::TextButton::textColourOffId));
-        juce::Font f(juce::FontOptions(13.0f, juce::Font::bold));
-        f.setExtraKerningFactor(0.018f);
-        g.setFont(f);
-        g.drawFittedText(button.getButtonText(), r, juce::Justification::centredLeft, 1);
+        if (! id.startsWith("win-"))
+        {
+            g.setColour(button.findColour(juce::TextButton::textColourOffId));
+            juce::Font f(juce::FontOptions(13.0f, juce::Font::bold));
+            f.setExtraKerningFactor(0.018f);
+            g.setFont(f);
+            g.drawFittedText(button.getButtonText(), r, juce::Justification::centredLeft, 1);
+        }
 
         g.setColour(kUiAccentSoft);
-        const auto id = button.getComponentID();
         const auto x = icon.getX();
         const auto y = icon.getY();
         const auto w = icon.getWidth();
@@ -225,6 +252,23 @@ public:
             juce::Path nib;
             nib.addTriangle(x + w - 3.0f, y + 2.1f, x + w - 1.4f, y + 3.8f, x + w - 3.7f, y + 4.2f);
             g.fillPath(nib);
+        }
+        else if (id == "win-min")
+        {
+            g.setColour(juce::Colour(0xff2a1f26).withAlpha(0.9f));
+            g.drawLine(cx - 2.8f, cy + 1.8f, cx + 2.8f, cy + 1.8f, 1.5f);
+        }
+        else if (id == "win-max")
+        {
+            g.setColour(juce::Colour(0xff2a1f26).withAlpha(0.9f));
+            g.drawLine(cx - 2.8f, cy, cx + 2.8f, cy, 1.45f);
+            g.drawLine(cx, cy - 2.8f, cx, cy + 2.8f, 1.45f);
+        }
+        else if (id == "win-close")
+        {
+            g.setColour(juce::Colour(0xff2a1f26).withAlpha(0.92f));
+            g.drawLine(cx - 2.8f, cy - 2.8f, cx + 2.8f, cy + 2.8f, 1.55f);
+            g.drawLine(cx + 2.8f, cy - 2.8f, cx - 2.8f, cy + 2.8f, 1.55f);
         }
     }
 
@@ -651,7 +695,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     titleFont.setExtraKerningFactor(0.018f);
     title.setFont(titleFont);
     addAndMakeVisible(title);
-    title.setVisible(false);
+    title.setVisible(true);
 
     inputLabel.setText("Input Mic", juce::dontSendNotification);
     outputLabel.setText("Fizzle Mic Output", juce::dontSendNotification);
@@ -740,6 +784,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     effectsToggle.setButtonText("Effects On");
     routeSpeakersButton.setButtonText("Listen");
     settingsButton.setButtonText("Settings");
+    windowMinButton.setButtonText({});
+    windowMaxButton.setButtonText({});
+    windowCloseButton.setButtonText({});
     savePresetButton.setComponentID("save");
     deletePresetButton.setComponentID("remove");
     restartButton.setComponentID("restart");
@@ -749,10 +796,14 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     routeSpeakersButton.setComponentID("listen");
     removeVstButton.setComponentID("remove");
     settingsButton.setComponentID("settings");
+    windowMinButton.setComponentID("win-min");
+    windowMaxButton.setComponentID("win-max");
+    windowCloseButton.setComponentID("win-close");
 
-    const std::array<juce::Button*, 11> buttons {
+    const std::array<juce::Button*, 14> buttons {
         &savePresetButton, &deletePresetButton, &rescanVstButton, &autoScanVstButton, &removeVstButton,
-        &routeSpeakersButton, &restartButton, &aboutButton, &toneButton, &effectsToggle, &settingsButton
+        &routeSpeakersButton, &restartButton, &aboutButton, &toneButton, &effectsToggle, &settingsButton,
+        &windowMinButton, &windowMaxButton, &windowCloseButton
     };
     for (auto* b : buttons)
     {
@@ -1488,6 +1539,61 @@ void MainComponent::applyWindowsStartupSetting()
 #endif
 }
 
+void MainComponent::toggleWindowMaximize()
+{
+    if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+    {
+        if (! windowMaximized)
+        {
+            windowRestoreBounds = window->getBounds();
+            window->setBounds(window->getParentMonitorArea());
+            windowMaximized = true;
+        }
+        else
+        {
+            if (! windowRestoreBounds.isEmpty())
+                window->setBounds(windowRestoreBounds);
+            windowMaximized = false;
+        }
+    }
+}
+
+void MainComponent::mouseDown(const juce::MouseEvent& e)
+{
+    draggingWindow = false;
+    if (! headerBounds.contains(e.getPosition()))
+        return;
+
+    if (e.originalComponent == &windowMinButton || e.originalComponent == &windowMaxButton || e.originalComponent == &windowCloseButton)
+        return;
+
+    if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+    {
+        windowDragger.startDraggingComponent(window, e);
+        draggingWindow = true;
+    }
+}
+
+void MainComponent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (! draggingWindow)
+        return;
+
+    if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+        windowDragger.dragComponent(window, e, nullptr);
+}
+
+void MainComponent::mouseUp(const juce::MouseEvent&)
+{
+    draggingWindow = false;
+}
+
+void MainComponent::mouseDoubleClick(const juce::MouseEvent& e)
+{
+    if (headerBounds.contains(e.getPosition()))
+        toggleWindowMaximize();
+}
+
 void MainComponent::refreshKnownPlugins()
 {
     suppressPluginAddFromSelection = true;
@@ -2140,7 +2246,21 @@ void MainComponent::loadPresetByName(const juce::String& name)
 
 void MainComponent::buttonClicked(juce::Button* button)
 {
-    if (button == &restartButton)
+    if (button == &windowMinButton)
+    {
+        if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+            window->setMinimised(true);
+    }
+    else if (button == &windowMaxButton)
+    {
+        toggleWindowMaximize();
+    }
+    else if (button == &windowCloseButton)
+    {
+        if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+            window->closeButtonPressed();
+    }
+    else if (button == &restartButton)
     {
         juce::String error;
         engine.restartAudio(error);
@@ -2691,7 +2811,7 @@ void MainComponent::paint(juce::Graphics& g)
         juce::Path p;
         p.addRoundedRectangle(r.getX(), r.getY(), r.getWidth(), r.getHeight(),
                               radius, radius,
-                              false, false, true, true);
+                              true, true, true, true);
         return p;
     };
 
@@ -2714,20 +2834,13 @@ void MainComponent::paint(juce::Graphics& g)
     g.setGradientFill(cardFill);
     g.fillPath(makePanelPath(card, 21.0f));
 
-    auto topBlend = card.withHeight(60.0f);
-    juce::Path blendPath;
-    blendPath.addRoundedRectangle(topBlend.getX(), topBlend.getY(), topBlend.getWidth(), topBlend.getHeight() + 16.0f,
-                                  18.0f, 18.0f, true, true, false, false);
-    juce::ColourGradient blendFill(kUiPanelSoft.withAlpha(0.28f), topBlend.getX(), topBlend.getY(),
-                                   juce::Colours::transparentBlack, topBlend.getX(), topBlend.getBottom() + 16.0f, false);
-    g.setGradientFill(blendFill);
-    g.fillPath(blendPath);
-
-    auto seamShade = juce::Rectangle<float>(card.getX() + 10.0f, card.getY() + 1.0f, card.getWidth() - 20.0f, 22.0f);
-    juce::ColourGradient seam(juce::Colours::white.withAlpha(0.03f), seamShade.getX(), seamShade.getY(),
-                              juce::Colours::transparentBlack, seamShade.getX(), seamShade.getBottom(), false);
-    g.setGradientFill(seam);
-    g.fillRoundedRectangle(seamShade, 8.0f);
+    auto header = headerBounds.toFloat().expanded(1.5f, 0.5f);
+    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(0.5f), header.getX(), header.getY(),
+                                    kUiPanel.withAlpha(0.25f), header.getX(), header.getBottom(), false);
+    g.setGradientFill(headerFill);
+    g.fillRoundedRectangle(header, 11.0f);
+    g.setColour(kUiAccent.withAlpha(0.08f));
+    g.drawRoundedRectangle(header.reduced(0.8f), 10.2f, 0.9f);
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
     g.setColour(juce::Colours::white.withAlpha(0.02f));
@@ -2745,7 +2858,7 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(kUiAccentSoft.withAlpha(0.016f + pulse * 0.008f));
     g.strokePath(makePanelPath(shell.expanded(1.4f, 0.4f), shellRadius + 1.2f), juce::PathStrokeType(0.9f));
 
-    const auto dividerY = card.getY() + 9.0f;
+    const auto dividerY = header.getBottom() + 1.6f;
     const auto dividerX = card.getX() + 14.0f;
     const auto dividerW = card.getWidth() - 28.0f;
     g.setColour(kUiAccent.withAlpha(0.028f));
@@ -2758,6 +2871,16 @@ void MainComponent::paint(juce::Graphics& g)
     sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
     g.setGradientFill(sweep);
     g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.0f, dividerW, 2.0f));
+
+    if (appLogo.isValid() && ! headerLogoBounds.isEmpty())
+    {
+        g.drawImageWithin(appLogo,
+                          headerLogoBounds.getX(),
+                          headerLogoBounds.getY(),
+                          headerLogoBounds.getWidth(),
+                          headerLogoBounds.getHeight(),
+                          juce::RectanglePlacement::centred);
+    }
 
     const auto micIcon = inputIconBounds.toFloat();
     g.setColour(kUiText);
@@ -2821,7 +2944,20 @@ void MainComponent::resized()
     auto area = getLocalBounds().reduced(14, 8);
     const int gap = 8;
 
-    area.removeFromTop(1);
+    headerBounds = area.removeFromTop(34);
+    auto headerInner = headerBounds.reduced(8, 4);
+    auto windowButtons = headerInner.removeFromRight(86);
+    windowCloseButton.setBounds(windowButtons.removeFromRight(24));
+    windowButtons.removeFromRight(5);
+    windowMaxButton.setBounds(windowButtons.removeFromRight(24));
+    windowButtons.removeFromRight(5);
+    windowMinButton.setBounds(windowButtons.removeFromRight(24));
+
+    headerLogoBounds = headerInner.removeFromLeft(22).withSizeKeepingCentre(18, 18);
+    headerInner.removeFromLeft(6);
+    title.setBounds(headerInner.removeFromLeft(220));
+
+    area.removeFromTop(6);
 
     const int topWidth = area.getWidth();
     const int inputW = juce::jmax(180, static_cast<int>(topWidth * 0.24f));

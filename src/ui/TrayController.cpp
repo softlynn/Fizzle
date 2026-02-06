@@ -15,6 +15,14 @@ const juce::Colour kTrayHover(0x3058a8ff);
 class TrayMenuLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    TrayMenuLookAndFeel()
+    {
+        setColour(juce::PopupMenu::backgroundColourId, kTrayBg);
+        setColour(juce::PopupMenu::textColourId, kTrayText);
+        setColour(juce::PopupMenu::highlightedBackgroundColourId, kTrayHover.withAlpha(0.9f));
+        setColour(juce::PopupMenu::highlightedTextColourId, juce::Colours::white);
+    }
+
     int getPopupMenuBorderSize() override
     {
         return 0;
@@ -27,17 +35,15 @@ public:
 
     void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override
     {
-        g.fillAll(kTrayBg.withAlpha(0.97f));
+        g.fillAll(kTrayBg);
         auto r = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
-        juce::ColourGradient fill(kTrayPanel.withAlpha(0.97f), r.getX(), r.getY(),
-                                  kTrayBg.withAlpha(0.96f), r.getX(), r.getBottom(), false);
+        juce::ColourGradient fill(kTrayPanel, r.getX(), r.getY(),
+                                  kTrayBg, r.getX(), r.getBottom(), false);
         g.setGradientFill(fill);
-        g.fillRoundedRectangle(r.reduced(0.8f), 10.0f);
+        g.fillRect(r);
 
-        g.setColour(kTrayAccent.withAlpha(0.08f));
-        g.drawRoundedRectangle(r.reduced(1.0f), 9.8f, 0.9f);
-        g.setColour(juce::Colours::white.withAlpha(0.03f));
-        g.drawRoundedRectangle(r.reduced(1.8f), 8.9f, 0.8f);
+        g.setColour(kTrayAccent.withAlpha(0.06f));
+        g.drawRect(r.toNearestInt(), 1);
     }
 
     void drawPopupMenuItem(juce::Graphics& g,
