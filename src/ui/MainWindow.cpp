@@ -6,8 +6,8 @@ namespace fizzle
 {
 namespace
 {
-const juce::Colour kWindowTop(0xff1a2538);
-const juce::Colour kWindowBottom(0xff121b2a);
+const juce::Colour kWindowTop(0xff1f2e47);
+const juce::Colour kWindowBottom(0xff1a2740);
 const juce::Colour kWindowBorder(0xffff9aa6);
 const juce::Colour kWindowText(0xfff3f7ff);
 const juce::Colour kWindowButtonSalmon(0xffff8d92);
@@ -97,12 +97,6 @@ public:
         g.setGradientFill(fill);
         g.fillPath(chrome);
 
-        juce::ColourGradient edgeFade(juce::Colours::transparentBlack, 12.0f, r.getBottom() - 0.5f,
-                                      kWindowBorder.withAlpha(0.04f), r.getCentreX(), r.getBottom() - 0.5f, false);
-        edgeFade.addColour(1.0, juce::Colours::transparentBlack);
-        g.setGradientFill(edgeFade);
-        g.fillRect(juce::Rectangle<float>(12.0f, r.getBottom() - 1.5f, r.getWidth() - 24.0f, 2.0f));
-
         auto iconBounds = juce::Rectangle<int>(titleSpaceX + 4, juce::jmax(2, (height - 20) / 2), 20, 20);
         if (logo.isValid())
             g.drawImageWithin(logo, iconBounds.getX(), iconBounds.getY(), iconBounds.getWidth(), iconBounds.getHeight(),
@@ -186,6 +180,11 @@ MainWindow::~MainWindow()
 MainComponent* MainWindow::getMainComponent() const
 {
     return dynamic_cast<MainComponent*>(getContentComponent());
+}
+
+juce::BorderSize<int> MainWindow::getContentComponentBorder() const
+{
+    return {};
 }
 
 void MainWindow::closeButtonPressed()

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.4 - Header/Tray Fix Follow-up
+
+### Fixed
+- Removed remaining content/titlebar separation by forcing zero content border.
+- Moved animated top line to a clean visible layer above controls.
+- Further softened shell border transparency and top seam contrast.
+- Eliminated residual white tray menu border with zero popup border + full background paint.
+
 ## v0.1.3 - Header and Transparency Pass
 
 ### Changed

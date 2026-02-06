@@ -15,6 +15,11 @@ const juce::Colour kTrayHover(0x3058a8ff);
 class TrayMenuLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    int getPopupMenuBorderSize() override
+    {
+        return 0;
+    }
+
     int getPopupMenuBorderSizeWithOptions(const juce::PopupMenu::Options&) override
     {
         return 0;
@@ -22,7 +27,7 @@ public:
 
     void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override
     {
-        g.fillAll(juce::Colours::transparentBlack);
+        g.fillAll(kTrayBg.withAlpha(0.97f));
         auto r = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
         juce::ColourGradient fill(kTrayPanel.withAlpha(0.97f), r.getX(), r.getY(),
                                   kTrayBg.withAlpha(0.96f), r.getX(), r.getBottom(), false);

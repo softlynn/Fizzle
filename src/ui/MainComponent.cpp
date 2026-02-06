@@ -2684,10 +2684,18 @@ juce::Component* MainComponent::refreshComponentForRow(int rowNumber, bool isRow
 
 void MainComponent::paint(juce::Graphics& g)
 {
-    auto shell = getLocalBounds().toFloat().reduced(5.0f);
+    auto shell = getLocalBounds().toFloat().reduced(4.0f, 0.0f);
     constexpr float shellRadius = 24.0f;
-    juce::Path shellPath;
-    shellPath.addRoundedRectangle(shell, shellRadius);
+    auto makePanelPath = [](juce::Rectangle<float> r, float radius)
+    {
+        juce::Path p;
+        p.addRoundedRectangle(r.getX(), r.getY(), r.getWidth(), r.getHeight(),
+                              radius, radius,
+                              false, false, true, true);
+        return p;
+    };
+
+    auto shellPath = makePanelPath(shell, shellRadius);
     g.reduceClipRegion(shellPath);
 
     const auto pulse = 0.5f + 0.5f * std::sin(uiPulse * 0.6f);
@@ -2696,15 +2704,15 @@ void MainComponent::paint(juce::Graphics& g)
     g.setGradientFill(bg);
     g.fillRect(getLocalBounds());
 
-    auto outer = shell.expanded(2.0f);
+    auto outer = shell.expanded(1.5f, 1.0f);
     g.setColour(kUiAccent.withAlpha(0.035f + pulse * 0.015f));
-    g.drawRoundedRectangle(outer, shellRadius + 2.0f, 1.4f);
+    g.strokePath(makePanelPath(outer, shellRadius + 1.5f), juce::PathStrokeType(1.2f));
 
-    auto card = shell.reduced(3.0f);
+    auto card = shell.reduced(2.4f, 0.7f);
     juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(0.9f), card.getX(), card.getY(),
                                   kUiPanel.withAlpha(0.95f), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
-    g.fillRoundedRectangle(card, 21.0f);
+    g.fillPath(makePanelPath(card, 21.0f));
 
     auto topBlend = card.withHeight(60.0f);
     juce::Path blendPath;
@@ -2732,21 +2740,21 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);
 
-    g.setColour(kUiAccent.withAlpha(0.075f + pulse * 0.02f));
-    g.drawRoundedRectangle(shell.reduced(0.9f), shellRadius - 0.8f, 1.0f);
-    g.setColour(kUiAccentSoft.withAlpha(0.02f + pulse * 0.01f));
-    g.drawRoundedRectangle(shell.expanded(1.8f), shellRadius + 1.5f, 1.0f);
+    g.setColour(kUiAccent.withAlpha(0.055f + pulse * 0.016f));
+    g.strokePath(makePanelPath(shell.reduced(0.9f, 0.0f), shellRadius - 0.8f), juce::PathStrokeType(0.95f));
+    g.setColour(kUiAccentSoft.withAlpha(0.016f + pulse * 0.008f));
+    g.strokePath(makePanelPath(shell.expanded(1.4f, 0.4f), shellRadius + 1.2f), juce::PathStrokeType(0.9f));
 
-    const auto dividerY = card.getY() + 48.0f;
+    const auto dividerY = card.getY() + 9.0f;
     const auto dividerX = card.getX() + 14.0f;
     const auto dividerW = card.getWidth() - 28.0f;
-    g.setColour(kUiAccent.withAlpha(0.02f));
+    g.setColour(kUiAccent.withAlpha(0.028f));
     g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.0f);
-    const auto loopWidth = dividerW + 120.0f;
-    const auto phase = std::fmod(uiPulse * 80.0f, loopWidth);
+    const auto loopWidth = dividerW + 180.0f;
+    const auto phase = std::fmod(uiPulse * 96.0f, loopWidth);
     const auto x0 = dividerX - 60.0f + phase;
     juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
-                               kUiAccentSoft.withAlpha(0.18f), x0 + 64.0f, dividerY, false);
+                               kUiAccentSoft.withAlpha(0.25f), x0 + 72.0f, dividerY, false);
     sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
     g.setGradientFill(sweep);
     g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.0f, dividerW, 2.0f));
@@ -2810,10 +2818,10 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(14, 10);
+    auto area = getLocalBounds().reduced(14, 8);
     const int gap = 8;
 
-    area.removeFromTop(6);
+    area.removeFromTop(1);
 
     const int topWidth = area.getWidth();
     const int inputW = juce::jmax(180, static_cast<int>(topWidth * 0.24f));

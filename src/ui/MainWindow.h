@@ -13,6 +13,7 @@ public:
     ~MainWindow() override;
     MainComponent* getMainComponent() const;
     void closeButtonPressed() override;
+    juce::BorderSize<int> getContentComponentBorder() const override;
 
 private:
     class WindowLookAndFeel;

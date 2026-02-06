@@ -1,5 +1,5 @@
 #define MyAppName "Fizzle"
-#define MyAppVersion "0.1.3"
+#define MyAppVersion "0.1.4"
 #define MyAppPublisher "Fizzle Audio"
 #define MyAppExeName "Fizzle.exe"
 #ifndef MyOutputBaseFilename
