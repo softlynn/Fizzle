@@ -47,7 +47,7 @@ struct EngineSettings
     bool startMinimizedToTray { false };
     bool followAutoEnableWindowState { false };
     bool lightMode { false };
-    bool transparentBackground { true };
+    bool transparentBackground { false };
     int themeVariant { 0 }; // 0 = Aqua, 1 = Salmon
     int uiDensity { 1 }; // 0 = Small (Compact), 1 = Normal, 2 = Large
 };

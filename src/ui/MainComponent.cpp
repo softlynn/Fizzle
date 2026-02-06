@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "MainWindow.h"
 #include "Theme.h"
 #include "../core/Logger.h"
 #include <BinaryData.h>
@@ -1246,6 +1247,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 
 void MainComponent::onWindowVisible()
 {
+    applyThemePalette();
+
     if (scannedOnVisible)
         return;
 
@@ -1779,6 +1782,17 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
 
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
     {
+#if JUCE_WINDOWS
+        if (auto* peer = window->getPeer())
+        {
+            if (auto hwnd = static_cast<HWND>(peer->getNativeHandle()))
+            {
+                ReleaseCapture();
+                SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+                return;
+            }
+        }
+#endif
         windowDragger.startDraggingComponent(window, e);
         draggingWindow = true;
     }
@@ -2155,11 +2169,11 @@ void MainComponent::applyThemePalette()
 
     if (lightMode)
     {
-        kUiBg = juce::Colour(0xffdfe7f2);
-        kUiPanel = juce::Colour(0xffe8eef7);
-        kUiPanelSoft = juce::Colour(0xffd8e2f0);
-        kUiText = juce::Colour(0xff1f2d44);
-        kUiTextMuted = juce::Colour(0xff5f738f);
+        kUiBg = juce::Colour(0xffe2e9f3);
+        kUiPanel = juce::Colour(0xffedf2f9);
+        kUiPanelSoft = juce::Colour(0xffdbe5f2);
+        kUiText = juce::Colour(0xff17253a);
+        kUiTextMuted = juce::Colour(0xff425a79);
     }
     else
     {
@@ -2183,7 +2197,7 @@ void MainComponent::applyThemePalette()
         kUiMint = lightMode ? juce::Colour(0xff66aac8) : juce::Colour(0xff9af7d8);
     }
 
-    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.72f : 0.66f) : 1.0f;
+    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.90f : 0.84f) : 1.0f;
 
     theme::background = kUiBg;
     theme::panel = kUiPanel;
@@ -2254,6 +2268,8 @@ void MainComponent::applyThemePalette()
     }
 
     diagnostics.applyStyle(kUiControlScale);
+    if (auto* window = findParentComponentOfClass<MainWindow>())
+        window->setTransparentBackgroundEnabled(cachedSettings.transparentBackground);
     styleTransitionAlpha = 0.42f;
     repaint();
 }
@@ -2263,16 +2279,16 @@ void MainComponent::applyUiDensity()
     switch (cachedSettings.uiDensity)
     {
         case 0:
-            uiScale = 0.86f;
-            kUiControlScale = 0.90f;
+            uiScale = 0.92f;
+            kUiControlScale = 0.95f;
             break;
         case 2:
-            uiScale = 1.12f;
-            kUiControlScale = 1.08f;
+            uiScale = 1.30f;
+            kUiControlScale = 1.22f;
             break;
         default:
-            uiScale = 1.0f;
-            kUiControlScale = 1.0f;
+            uiScale = 1.08f;
+            kUiControlScale = 1.08f;
             break;
     }
 
