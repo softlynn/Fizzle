@@ -37,6 +37,9 @@ public:
     void trayLoadPreset(const juce::String& name);
     bool areEffectsEnabled() const;
     bool isMuted() const;
+    bool isLightModeEnabled() const;
+    int getThemeVariant() const;
+    int getUiDensity() const;
 
 private:
     class ProgramListModel;

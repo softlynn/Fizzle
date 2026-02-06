@@ -511,8 +511,16 @@ public:
     {
     }
 
+    void setPanelBounds(juce::Rectangle<int> bounds)
+    {
+        panelBounds = bounds.toFloat();
+        repaint();
+    }
+
     juce::Rectangle<float> getPanelBounds() const
     {
+        if (! panelBounds.isEmpty())
+            return panelBounds;
         return getLocalBounds().toFloat().reduced(80.0f, 56.0f);
     }
 
@@ -548,6 +556,7 @@ public:
 
 private:
     std::function<void()> dismiss;
+    juce::Rectangle<float> panelBounds;
 };
 
 class PluginEditorWindow final : public juce::DocumentWindow
@@ -1270,6 +1279,21 @@ bool MainComponent::areEffectsEnabled() const
 bool MainComponent::isMuted() const
 {
     return params.mute.load();
+}
+
+bool MainComponent::isLightModeEnabled() const
+{
+    return cachedSettings.lightMode;
+}
+
+int MainComponent::getThemeVariant() const
+{
+    return juce::jlimit(0, 1, cachedSettings.themeVariant);
+}
+
+int MainComponent::getUiDensity() const
+{
+    return juce::jlimit(0, 2, cachedSettings.uiDensity);
 }
 
 void MainComponent::trayToggleEffectsBypass()
@@ -3719,17 +3743,33 @@ void MainComponent::resized()
     if (settingsPanel != nullptr)
     {
         settingsPanel->setBounds(getLocalBounds());
-        auto panel = getLocalBounds().reduced(juce::roundToInt(80.0f * uiScale), juce::roundToInt(56.0f * uiScale));
-        auto sidebar = panel.removeFromLeft(juce::roundToInt(196.0f * uiScale)).reduced(juce::roundToInt(12.0f * uiScale));
+        auto panelBounds = getLocalBounds();
+        const int marginX = juce::jmin(juce::roundToInt(72.0f * uiScale), juce::jmax(18, panelBounds.getWidth() / 6));
+        const int marginY = juce::jmin(juce::roundToInt(52.0f * uiScale), juce::jmax(14, panelBounds.getHeight() / 7));
+        auto panel = panelBounds.reduced(marginX, marginY);
+
+        const int minPanelW = juce::jmin(panelBounds.getWidth() - 24, juce::roundToInt(640.0f * uiScale));
+        const int minPanelH = juce::jmin(panelBounds.getHeight() - 24, juce::roundToInt(430.0f * uiScale));
+        if (panel.getWidth() < minPanelW || panel.getHeight() < minPanelH)
+            panel = panel.withSizeKeepingCentre(juce::jmax(panel.getWidth(), minPanelW),
+                                                juce::jmax(panel.getHeight(), minPanelH));
+
+        if (auto* overlay = dynamic_cast<SettingsOverlay*>(settingsPanel.get()))
+            overlay->setPanelBounds(panel);
+
+        const int sidebarW = juce::jlimit(150, juce::jmax(220, panel.getWidth() / 3), juce::roundToInt(196.0f * uiScale));
+        auto sidebar = panel.removeFromLeft(sidebarW).reduced(juce::roundToInt(12.0f * uiScale));
+        const int navRowH = juce::roundToInt(32.0f * uiScale);
+        const int navGap = juce::jmax(4, juce::roundToInt(6.0f * uiScale));
         settingsNavLabel.setBounds(sidebar.removeFromTop(juce::roundToInt(24.0f * uiScale)));
         sidebar.removeFromTop(juce::roundToInt(8.0f * uiScale));
-        settingsNavAutoEnableButton.setBounds(sidebar.removeFromTop(juce::roundToInt(32.0f * uiScale)));
-        sidebar.removeFromTop(juce::roundToInt(6.0f * uiScale));
-        settingsNavAppearanceButton.setBounds(sidebar.removeFromTop(juce::roundToInt(32.0f * uiScale)));
-        sidebar.removeFromTop(juce::roundToInt(6.0f * uiScale));
-        settingsNavUpdatesButton.setBounds(sidebar.removeFromTop(juce::roundToInt(32.0f * uiScale)));
-        sidebar.removeFromTop(juce::roundToInt(6.0f * uiScale));
-        settingsNavStartupButton.setBounds(sidebar.removeFromTop(juce::roundToInt(32.0f * uiScale)));
+        settingsNavAutoEnableButton.setBounds(sidebar.removeFromTop(navRowH));
+        sidebar.removeFromTop(navGap);
+        settingsNavAppearanceButton.setBounds(sidebar.removeFromTop(navRowH));
+        sidebar.removeFromTop(navGap);
+        settingsNavUpdatesButton.setBounds(sidebar.removeFromTop(navRowH));
+        sidebar.removeFromTop(navGap);
+        settingsNavStartupButton.setBounds(sidebar.removeFromTop(navRowH));
 
         auto content = panel.reduced(juce::roundToInt(14.0f * uiScale));
         auto contentNoFooter = content;

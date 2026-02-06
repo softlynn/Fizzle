@@ -207,6 +207,32 @@ private:
                 return main->isMuted();
         return effectParams.mute.load();
     }
+
+    TrayController::Appearance trayAppearance() const override
+    {
+        TrayController::Appearance appearance;
+
+        if (window != nullptr)
+        {
+            if (auto* main = window->getMainComponent())
+            {
+                appearance.lightMode = main->isLightModeEnabled();
+                appearance.themeVariant = main->getThemeVariant();
+                appearance.uiDensity = main->getUiDensity();
+                return appearance;
+            }
+        }
+
+        if (settings != nullptr)
+        {
+            const auto s = settings->loadEngineSettings();
+            appearance.lightMode = s.lightMode;
+            appearance.themeVariant = juce::jlimit(0, 1, s.themeVariant);
+            appearance.uiDensity = juce::jlimit(0, 2, s.uiDensity);
+        }
+
+        return appearance;
+    }
 };
 }
 

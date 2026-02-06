@@ -7,6 +7,13 @@ namespace fizzle
 class TrayController : public juce::SystemTrayIconComponent
 {
 public:
+    struct Appearance
+    {
+        bool lightMode { false };
+        int themeVariant { 0 };
+        int uiDensity { 1 };
+    };
+
     struct Listener
     {
         virtual ~Listener() = default;
@@ -19,6 +26,7 @@ public:
         virtual juce::StringArray trayPresets() const = 0;
         virtual bool trayEffectsEnabled() const = 0;
         virtual bool trayMuted() const = 0;
+        virtual Appearance trayAppearance() const = 0;
     };
 
     explicit TrayController(Listener& l);
@@ -29,6 +37,7 @@ public:
 private:
     Listener& listener;
     std::unique_ptr<juce::LookAndFeel_V4> trayLookAndFeel;
+    Appearance appearance;
     juce::Image createIcon() const;
     void showContextMenu();
 };
