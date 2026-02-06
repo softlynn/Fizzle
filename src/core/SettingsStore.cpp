@@ -45,6 +45,18 @@ EngineSettings fromVar(const juce::var& data)
         out.followAutoEnableWindowState = obj->hasProperty("followAutoEnableWindowState")
                                               ? static_cast<bool>(obj->getProperty("followAutoEnableWindowState"))
                                               : false;
+        out.lightMode = obj->hasProperty("lightMode")
+                            ? static_cast<bool>(obj->getProperty("lightMode"))
+                            : false;
+        out.transparentBackground = obj->hasProperty("transparentBackground")
+                                        ? static_cast<bool>(obj->getProperty("transparentBackground"))
+                                        : true;
+        out.themeVariant = obj->hasProperty("themeVariant")
+                               ? static_cast<int>(obj->getProperty("themeVariant"))
+                               : 0;
+        out.uiDensity = obj->hasProperty("uiDensity")
+                            ? static_cast<int>(obj->getProperty("uiDensity"))
+                            : 1;
         if (auto* arr = obj->getProperty("scannedVstPaths").getArray())
         {
             for (const auto& v : *arr)
@@ -79,6 +91,10 @@ juce::var toVar(const EngineSettings& settings)
     obj->setProperty("startWithWindows", settings.startWithWindows);
     obj->setProperty("startMinimizedToTray", settings.startMinimizedToTray);
     obj->setProperty("followAutoEnableWindowState", settings.followAutoEnableWindowState);
+    obj->setProperty("lightMode", settings.lightMode);
+    obj->setProperty("transparentBackground", settings.transparentBackground);
+    obj->setProperty("themeVariant", settings.themeVariant);
+    obj->setProperty("uiDensity", settings.uiDensity);
     juce::Array<juce::var> paths;
     for (const auto& p : settings.scannedVstPaths)
         paths.add(p);

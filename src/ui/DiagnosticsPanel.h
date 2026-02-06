@@ -15,14 +15,20 @@ public:
         text.setMultiLine(true);
         text.setReadOnly(true);
         text.setScrollbarsShown(true);
+        applyStyle(1.0f);
+        startTimerHz(4);
+    }
+
+    void applyStyle(float uiScale)
+    {
         text.setColour(juce::TextEditor::backgroundColourId, theme::panel.withAlpha(0.55f));
         text.setColour(juce::TextEditor::outlineColourId, juce::Colour(0x00000000));
         text.setColour(juce::TextEditor::highlightColourId, theme::accent.withAlpha(0.22f));
         text.setColour(juce::TextEditor::textColourId, theme::text);
-        juce::Font font(juce::FontOptions(15.0f));
+        juce::Font font(juce::FontOptions(15.0f * uiScale));
         font.setExtraKerningFactor(0.014f);
         text.applyFontToAllText(font);
-        startTimerHz(4);
+        repaint();
     }
 
     void resized() override

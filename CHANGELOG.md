@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.1.8 - Stability + Appearance Settings Pass
+
+### Fixed
+- Hardened audio device reconfigure flow to reduce launch and buffer-size change crashes.
+- Diagnostics now report the active runtime buffer size from the audio callback (not only requested size).
+- Smoothed window dragging by skipping heavy UI refresh work while the app is actively dragged.
+- Refined tray popup window flags/background behavior to reduce Windows border artifacts.
+
+### Added
+- Appearance settings now persist and apply live:
+  - Light/Dark mode
+  - Aqua/Salmon theme variants
+  - Background opacity (Transparent/Opaque)
+  - UI size (Small, Normal, Large)
+
+### Changed
+- Header lane spacing and divider animation placement were tuned for cleaner integration with the main body.
+- Subtle border/glow balancing and logo visibility polish across themes.
+
 ## v0.1.7 - Header Integration + Tray State Clarity
 
 ### Fixed

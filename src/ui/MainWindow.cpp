@@ -11,7 +11,7 @@ MainWindow::MainWindow(std::unique_ptr<MainComponent> content)
 {
     setUsingNativeTitleBar(false);
     setTitleBarHeight(0);
-    setResizable(true, false);
+    setResizable(true, true);
     setResizeLimits(980, 620, 1500, 900);
     setOpaque(false);
     setDropShadowEnabled(false);

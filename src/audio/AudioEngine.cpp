@@ -16,7 +16,19 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
     settings = requested;
 
     juce::AudioDeviceManager::AudioDeviceSetup setup;
-    deviceManager.initialiseWithDefaultDevices(2, 2);
+    if (! deviceManagerInitialised)
+    {
+        const auto initError = deviceManager.initialise(2, 2, nullptr, true, {}, nullptr);
+        if (initError.isNotEmpty())
+        {
+            error = initError;
+            Logger::instance().log("Audio device manager init failed: " + initError);
+            return false;
+        }
+        deviceManagerInitialised = true;
+    }
+
+    deviceManager.removeAudioCallback(this);
     deviceManager.getAudioDeviceSetup(setup);
 
     if (auto* type = deviceManager.getCurrentDeviceTypeObject())
@@ -72,7 +84,20 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         }
     }
 
+    juce::AudioDeviceManager::AudioDeviceSetup appliedSetup;
+    deviceManager.getAudioDeviceSetup(appliedSetup);
+    settings.inputDeviceName = appliedSetup.inputDeviceName;
+    settings.outputDeviceName = appliedSetup.outputDeviceName;
+    if (appliedSetup.bufferSize > 0)
+        settings.bufferSize = appliedSetup.bufferSize;
+    if (appliedSetup.sampleRate > 0.0)
+        settings.preferredSampleRate = appliedSetup.sampleRate;
+
     deviceManager.addAudioCallback(this);
+
+    if (listenEnabled.load() && monitorOutputDevice.isNotEmpty())
+        setListenEnabled(true);
+
     Logger::instance().log("Audio engine started");
     return true;
 }
@@ -100,7 +125,17 @@ void AudioEngine::setListenEnabled(bool enabled)
         return;
 
     juce::String error;
-    monitorDeviceManager.initialise(0, 2, nullptr, true, {}, nullptr);
+    if (! monitorManagerInitialised)
+    {
+        error = monitorDeviceManager.initialise(0, 2, nullptr, true, {}, nullptr);
+        if (error.isNotEmpty())
+        {
+            Logger::instance().log("Monitor manager init failed: " + error);
+            listenEnabled.store(false);
+            return;
+        }
+        monitorManagerInitialised = true;
+    }
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     monitorDeviceManager.getAudioDeviceSetup(setup);
     setup.outputDeviceName = monitorOutputDevice;
@@ -153,7 +188,8 @@ EngineSettings AudioEngine::currentSettings() const
 void AudioEngine::restartAudio(juce::String& error)
 {
     stop();
-    start(settings, error);
+    if (! start(settings, error))
+        Logger::instance().log("Audio restart failed: " + error);
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
@@ -186,12 +222,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     }
 
     const auto deviceRate = currentDeviceSampleRate.load();
+    const auto safeDeviceRate = (deviceRate > 1000.0) ? deviceRate : kInternalSampleRate;
 
-    const auto internalSamples = static_cast<int>(std::ceil((static_cast<double>(numSamples) * kInternalSampleRate) / deviceRate));
+    const auto internalSamples = static_cast<int>(std::ceil((static_cast<double>(numSamples) * kInternalSampleRate) / safeDeviceRate));
     internalBuffer.setSize(2, juce::jmax(1, internalSamples), false, false, true);
     internalBuffer.clear();
 
-    resampler.process(inBuffer, internalBuffer, deviceRate, kInternalSampleRate);
+    resampler.process(inBuffer, internalBuffer, safeDeviceRate, kInternalSampleRate);
     if (numInputChannels <= 1 && internalBuffer.getNumChannels() > 1)
         internalBuffer.copyFrom(1, 0, internalBuffer, 0, 0, internalBuffer.getNumSamples());
 
@@ -224,7 +261,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 
     outBuffer.setSize(juce::jmax(1, numOutputChannels), numSamples, false, false, true);
     outBuffer.clear();
-    resampler.process(internalBuffer, outBuffer, kInternalSampleRate, deviceRate);
+    resampler.process(internalBuffer, outBuffer, kInternalSampleRate, safeDeviceRate);
 
     float outPeak = 0.0f;
     for (int c = 0; c < outBuffer.getNumChannels(); ++c)
@@ -254,15 +291,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 
     const auto elapsedTicks = juce::Time::getHighResolutionTicks() - tick;
     const auto seconds = juce::Time::highResolutionTicksToSeconds(elapsedTicks);
-    const auto blockSeconds = static_cast<double>(numSamples) / deviceRate;
-    const auto configuredBuffer = settings.bufferSize > 0 ? settings.bufferSize : numSamples;
+    const auto blockSeconds = static_cast<double>(numSamples) / safeDeviceRate;
+    const auto configuredBuffer = numSamples;
 
     const juce::ScopedLock sl(diagnosticsLock);
-    diagnostics.sampleRate = deviceRate;
+    diagnostics.sampleRate = safeDeviceRate;
     diagnostics.bufferSize = configuredBuffer;
     diagnostics.cpuPercent = juce::jlimit(0.0, 100.0, (seconds / blockSeconds) * 100.0);
-    const auto dryMs = (deviceRate > 0.0) ? ((2.0 * static_cast<double>(configuredBuffer)) / deviceRate) * 1000.0 : 0.0;
-    const auto pluginMs = (deviceRate > 0.0) ? (1000.0 * static_cast<double>(vstHost.getLatencySamples()) / deviceRate) : 0.0;
+    const auto dryMs = (safeDeviceRate > 0.0) ? ((2.0 * static_cast<double>(configuredBuffer)) / safeDeviceRate) * 1000.0 : 0.0;
+    const auto pluginMs = (safeDeviceRate > 0.0) ? (1000.0 * static_cast<double>(vstHost.getLatencySamples()) / safeDeviceRate) : 0.0;
     diagnostics.dryLatencyMs = dryMs;
     diagnostics.postFxLatencyMs = dryMs + pluginMs;
     diagnostics.inputLevel = inPeak;
@@ -274,7 +311,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 {
-    const auto sampleRate = device != nullptr ? device->getCurrentSampleRate() : kInternalSampleRate;
+    const auto rawRate = device != nullptr ? device->getCurrentSampleRate() : kInternalSampleRate;
+    const auto sampleRate = rawRate > 1000.0 ? rawRate : kInternalSampleRate;
     const auto deviceBuffer = device != nullptr ? juce::jmax(1, device->getCurrentBufferSizeSamples()) : 256;
     const auto internalBlock = static_cast<int>(std::ceil((static_cast<double>(deviceBuffer) * kInternalSampleRate) / sampleRate));
     currentDeviceSampleRate.store(sampleRate);

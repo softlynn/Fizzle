@@ -54,7 +54,10 @@ public:
 
     int getMenuWindowFlags() override
     {
-        return juce::ComponentPeer::windowHasDropShadow;
+        return juce::ComponentPeer::windowIsTemporary
+             | juce::ComponentPeer::windowIgnoresKeyPresses
+             | juce::ComponentPeer::windowHasDropShadow
+             | juce::ComponentPeer::windowIsSemiTransparent;
     }
 
     void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override
@@ -72,11 +75,8 @@ public:
 
     void drawBackground(juce::Graphics& g, int width, int height) const
     {
-        g.fillAll(juce::Colours::transparentBlack);
+        g.fillAll(kTrayBg);
         auto r = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
-        juce::Path shell;
-        shell.addRoundedRectangle(r.reduced(0.6f), 10.0f);
-        g.reduceClipRegion(shell);
 
         juce::ColourGradient fill(kTrayPanel, r.getX(), r.getY(),
                                   kTrayBg, r.getX(), r.getBottom(), false);
@@ -84,8 +84,8 @@ public:
         g.fillRect(r);
         g.setTiledImageFill(getMenuNoiseTile(), 0, 0, 0.05f);
         g.fillRect(r);
-        g.setColour(kTrayAccent.withAlpha(0.15f));
-        g.drawRoundedRectangle(r.reduced(1.0f), 9.0f, 1.0f);
+        g.setColour(kTrayAccent.withAlpha(0.12f));
+        g.drawRect(r.toNearestInt(), 1);
     }
 
     void drawPopupMenuItem(juce::Graphics& g,

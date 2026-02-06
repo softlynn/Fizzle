@@ -85,12 +85,22 @@ private:
     juce::Label appSearchLabel;
     juce::Label appListLabel;
     juce::Label enabledProgramsLabel;
+    juce::Label appearanceLabel;
     juce::Label updatesLabel;
     juce::Label updateStatusLabel;
     juce::Label settingsNavLabel;
     juce::TextButton settingsNavAutoEnableButton { "App Auto-Enable" };
+    juce::TextButton settingsNavAppearanceButton { "Appearance" };
     juce::TextButton settingsNavUpdatesButton { "Updates" };
     juce::TextButton settingsNavStartupButton { "Startup" };
+    juce::Label appearanceModeLabel;
+    juce::ToggleButton lightModeToggle { "Light mode" };
+    juce::Label appearanceThemeLabel;
+    juce::ComboBox appearanceThemeBox;
+    juce::Label appearanceBackgroundLabel;
+    juce::ComboBox appearanceBackgroundBox;
+    juce::Label appearanceSizeLabel;
+    juce::ComboBox appearanceSizeBox;
     juce::TextEditor appSearchEditor;
     juce::TextEditor appPathEditor;
     juce::TextButton browseAppPathButton { "Browse..." };
@@ -131,6 +141,9 @@ private:
     int dragToRow { -1 };
     int uiTickCount { 0 };
     int effectsHintTicks { 0 };
+    float effectsHintAlpha { 0.0f };
+    float effectsHintTargetAlpha { 0.0f };
+    float styleTransitionAlpha { 0.0f };
     bool manualEffectsOverrideAutoEnable { false };
     bool manualEffectsPinnedOn { false };
     juce::String lastPresetSnapshot;
@@ -176,6 +189,7 @@ private:
     float restartOverlayTargetAlpha { 0.0f };
     int restartOverlayTicks { 0 };
     juce::String restartOverlayText;
+    float uiScale { 1.0f };
 
     void buttonClicked(juce::Button* button) override;
     void comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged) override;
@@ -230,5 +244,8 @@ private:
     void toggleWindowMaximize();
     void applyEffectsEnabledState(bool enabled, bool fromUserToggle);
     void runAudioRestartWithOverlay(bool fromTray);
+    void applyThemePalette();
+    void applyUiDensity();
+    void refreshAppearanceControls();
 };
 }

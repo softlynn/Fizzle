@@ -74,6 +74,8 @@ private:
     juce::AudioDeviceManager deviceManager;
     juce::AudioDeviceManager monitorDeviceManager;
     MonitorCallback monitorCallback { *this };
+    bool deviceManagerInitialised { false };
+    bool monitorManagerInitialised { false };
     EffectParameters* params { nullptr };
     EngineSettings settings;
 
