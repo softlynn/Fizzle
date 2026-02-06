@@ -115,18 +115,45 @@ private:
 
     void trayToggleBypass() override
     {
+        if (window != nullptr)
+        {
+            if (auto* main = window->getMainComponent())
+            {
+                main->trayToggleEffectsBypass();
+                return;
+            }
+        }
+
         const auto next = ! effectParams.bypass.load();
         effectParams.bypass.store(next);
     }
 
     void trayToggleMute() override
     {
+        if (window != nullptr)
+        {
+            if (auto* main = window->getMainComponent())
+            {
+                main->trayToggleMute();
+                return;
+            }
+        }
+
         const auto next = ! effectParams.mute.load();
         effectParams.mute.store(next);
     }
 
     void trayRestartAudio() override
     {
+        if (window != nullptr)
+        {
+            if (auto* main = window->getMainComponent())
+            {
+                main->trayRestartAudio();
+                return;
+            }
+        }
+
         juce::String error;
         engine.restartAudio(error);
         if (error.isNotEmpty())
@@ -140,6 +167,15 @@ private:
 
     void trayPresetSelected(const juce::String& name) override
     {
+        if (window != nullptr)
+        {
+            if (auto* main = window->getMainComponent())
+            {
+                main->trayLoadPreset(name);
+                return;
+            }
+        }
+
         if (presets == nullptr)
             return;
 
@@ -147,22 +183,8 @@ private:
         if (! preset.has_value())
             return;
 
-        auto setParam = [&](const juce::String& key, std::atomic<float>& param)
-        {
-            if (const auto it = preset->values.find(key); it != preset->values.end())
-                param.store(it->second);
-        };
-
-        setParam("hpfHz", effectParams.hpfHz);
-        setParam("gateThresholdDb", effectParams.gateThresholdDb);
-        setParam("deEssAmount", effectParams.deEssAmount);
-        setParam("lowGainDb", effectParams.lowGainDb);
-        setParam("midGainDb", effectParams.midGainDb);
-        setParam("highGainDb", effectParams.highGainDb);
-        setParam("compThresholdDb", effectParams.compThresholdDb);
-        setParam("compRatio", effectParams.compRatio);
-        setParam("compMakeupDb", effectParams.compMakeupDb);
-        setParam("limiterCeilDb", effectParams.limiterCeilDb);
+        if (const auto it = preset->values.find("outputGainDb"); it != preset->values.end())
+            effectParams.outputGainDb.store(it->second);
     }
 
     juce::StringArray trayPresets() const override

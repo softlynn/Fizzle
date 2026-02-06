@@ -24,9 +24,30 @@ const juce::Colour kUiTextMuted(0xffa8bbdd);
 const juce::Colour kUiAccent(0xff6dbbff);
 const juce::Colour kUiAccentSoft(0xffa4ddff);
 const juce::Colour kUiMint(0xff9af7d8);
-const juce::Colour kUiSalmon(0xffff8d92);
+const juce::Colour kUiSalmon(0xff87a8d4);
 const juce::String kGithubRepoUrl("https://github.com/softlynn/Fizzle");
 const juce::String kWebsiteUrl("https://softlynn.github.io/Fizzle/");
+
+juce::Image createDitherNoiseTile()
+{
+    juce::Image img(juce::Image::ARGB, 64, 64, true);
+    juce::Random random(0x50721);
+    for (int y = 0; y < img.getHeight(); ++y)
+    {
+        for (int x = 0; x < img.getWidth(); ++x)
+        {
+            const auto v = static_cast<uint8_t>(128 + random.nextInt(25) - 12);
+            img.setPixelAt(x, y, juce::Colour(v, v, v));
+        }
+    }
+    return img;
+}
+
+const juce::Image& getDitherNoiseTile()
+{
+    static juce::Image tile = createDitherNoiseTile();
+    return tile;
+}
 
 juce::String normalizeVersionTag(juce::String value)
 {
@@ -113,19 +134,32 @@ public:
         const auto id = button.getComponentID();
         if (id.startsWith("win-"))
         {
-            auto b = button.getLocalBounds().toFloat().reduced(1.4f);
-            auto fill = (id == "win-close") ? kUiSalmon : kUiSalmon.brighter(0.16f);
-            if (isMouseOver) fill = fill.brighter(0.18f);
-            if (isButtonDown) fill = fill.darker(0.2f);
+            auto b = button.getLocalBounds().toFloat().reduced(1.5f, 4.0f);
+            const auto radius = b.getHeight() * 0.46f;
+            auto base = kUiPanelSoft.withAlpha(0.82f);
+            auto border = kUiAccent.withAlpha(0.24f);
+            if (id == "win-close")
+            {
+                base = kUiAccent.interpolatedWith(kUiSalmon, 0.35f).withAlpha(0.88f);
+                border = kUiAccentSoft.withAlpha(0.36f);
+            }
             if (isMouseOver)
             {
-                g.setColour(fill.withAlpha(isButtonDown ? 0.38f : 0.24f));
-                g.fillEllipse(b.expanded(1.8f));
+                base = base.brighter(0.10f);
+                border = border.withAlpha(border.getFloatAlpha() + 0.14f);
             }
-            g.setColour(fill.withAlpha(0.97f));
-            g.fillEllipse(b);
-            g.setColour(juce::Colours::white.withAlpha(isMouseOver ? 0.72f : 0.52f));
-            g.drawEllipse(b, isButtonDown ? 1.8f : 1.2f);
+            if (isButtonDown)
+                base = base.darker(0.12f);
+
+            if (isMouseOver)
+            {
+                g.setColour(base.withAlpha(isButtonDown ? 0.16f : 0.11f));
+                g.fillRoundedRectangle(b.expanded(2.0f, 1.4f), radius + 1.8f);
+            }
+            g.setColour(base);
+            g.fillRoundedRectangle(b, radius);
+            g.setColour(border);
+            g.drawRoundedRectangle(b.reduced(0.2f), radius - 0.2f, isMouseOver ? 1.15f : 0.95f);
             return;
         }
 
@@ -183,6 +217,8 @@ public:
         const auto h = icon.getHeight();
         const auto cx = icon.getCentreX();
         const auto cy = icon.getCentreY();
+
+        const auto winGlyph = juce::Colours::white.withAlpha(button.isDown() ? 0.95f : (button.isOver() ? 0.90f : 0.78f));
 
         if (id == "save")
         {
@@ -255,18 +291,18 @@ public:
         }
         else if (id == "win-min")
         {
-            g.setColour(juce::Colour(0xff2a1f26).withAlpha(0.9f));
+            g.setColour(winGlyph);
             g.drawLine(cx - 2.8f, cy + 1.8f, cx + 2.8f, cy + 1.8f, 1.5f);
         }
         else if (id == "win-max")
         {
-            g.setColour(juce::Colour(0xff2a1f26).withAlpha(0.9f));
+            g.setColour(winGlyph);
             g.drawLine(cx - 2.8f, cy, cx + 2.8f, cy, 1.45f);
             g.drawLine(cx, cy - 2.8f, cx, cy + 2.8f, 1.45f);
         }
         else if (id == "win-close")
         {
-            g.setColour(juce::Colour(0xff2a1f26).withAlpha(0.92f));
+            g.setColour(winGlyph);
             g.drawLine(cx - 2.8f, cy - 2.8f, cx + 2.8f, cy + 2.8f, 1.55f);
             g.drawLine(cx + 2.8f, cy - 2.8f, cx - 2.8f, cy + 2.8f, 1.55f);
         }
@@ -414,8 +450,15 @@ class SettingsOverlay final : public juce::Component
 public:
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colours::black.withAlpha(0.42f));
-        auto panel = getLocalBounds().reduced(80, 56).toFloat();
+        auto shell = getLocalBounds().toFloat().reduced(4.0f, 0.0f);
+        juce::Path shellPath;
+        shellPath.addRoundedRectangle(shell, 24.0f);
+        g.reduceClipRegion(shellPath);
+
+        g.setColour(juce::Colours::black.withAlpha(0.36f));
+        g.fillRect(shell.toNearestInt());
+
+        auto panel = shell.reduced(76.0f, 56.0f);
         juce::ColourGradient fill(kUiPanelSoft.withAlpha(0.96f), panel.getX(), panel.getY(),
                                   kUiPanel.withAlpha(0.93f), panel.getX(), panel.getBottom(), false);
         g.setGradientFill(fill);
@@ -498,7 +541,6 @@ public:
         name.setJustificationType(juce::Justification::centredLeft);
         name.setInterceptsMouseClicks(false, false);
         addMouseListener(this, true);
-        startTimerHz(60);
     }
 
     void setRowData(int rowIn, const juce::String& pluginName, bool isEnabled, float mixAmount, bool selectedIn)
@@ -554,6 +596,7 @@ public:
         dragging = true;
         setInterceptsMouseClicks(true, true);
         toFront(true);
+        startTimerHz(60);
         if (dragStart)
             dragStart(row);
         repaint();
@@ -594,6 +637,7 @@ public:
         dragging = false;
         dragOffsetY = 0.0f;
         targetScale = 1.0f;
+        startTimerHz(60);
         if (dragEnd)
             dragEnd(targetRow);
         repaint();
@@ -653,6 +697,7 @@ private:
         else
         {
             setTransform(juce::AffineTransform());
+            stopTimer();
         }
     }
 };
@@ -1063,7 +1108,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
         });
     }
 
-    startTimerHz(30);
+    startTimerHz(20);
 }
 
 void MainComponent::onWindowVisible()
@@ -1079,6 +1124,44 @@ void MainComponent::onWindowVisible()
         cachedSettings.scannedVstPaths = engine.getVstHost().getScannedPaths();
         saveCachedSettings();
     }
+}
+
+void MainComponent::trayToggleEffectsBypass()
+{
+    const auto enableEffects = params.bypass.load();
+    applyEffectsEnabledState(enableEffects, true);
+}
+
+void MainComponent::trayToggleMute()
+{
+    const auto next = ! params.mute.load();
+    params.mute.store(next);
+    setEffectsHint(next ? "Muted from tray" : "Unmuted from tray", 40);
+}
+
+void MainComponent::trayRestartAudio()
+{
+    juce::String error;
+    engine.restartAudio(error);
+    if (error.isNotEmpty())
+    {
+        Logger::instance().log("Restart error: " + error);
+        setEffectsHint("Audio restart failed", 60);
+        return;
+    }
+
+    loadDeviceLists();
+    setEffectsHint("Audio restarted", 35);
+}
+
+void MainComponent::trayLoadPreset(const juce::String& name)
+{
+    if (name.trim().isEmpty())
+        return;
+
+    loadPresetByName(name);
+    refreshPresets();
+    presetBox.setText(currentPresetName, juce::dontSendNotification);
 }
 
 juce::Array<juce::File> MainComponent::getDefaultVst3Folders() const
@@ -1860,6 +1943,45 @@ void MainComponent::setEffectsHint(const juce::String& text, int ticks)
     effectsHintTicks = juce::jmax(0, ticks);
 }
 
+void MainComponent::applyEffectsEnabledState(bool enabled, bool fromUserToggle)
+{
+    juce::ignoreUnused(fromUserToggle);
+    effectsToggle.setToggleState(enabled, juce::dontSendNotification);
+    effectsToggle.setButtonText(enabled ? "Effects On" : "Effects Off");
+    params.bypass.store(! enabled);
+    manualEffectsPinnedOn = enabled && cachedSettings.autoEnableByApp;
+
+    if (! cachedSettings.autoEnableByApp)
+    {
+        manualEffectsOverrideAutoEnable = false;
+        setEffectsHint({}, 0);
+        return;
+    }
+
+    bool hasCondition = false;
+    const auto autoWantsEnabled = computeAutoEnableShouldEnable(hasCondition);
+
+    if (enabled)
+    {
+        // Manual ON must always work, even while auto-enable is active.
+        manualEffectsOverrideAutoEnable = false;
+        setEffectsHint({}, 0);
+    }
+    else
+    {
+        if (hasCondition && autoWantsEnabled)
+        {
+            manualEffectsOverrideAutoEnable = true;
+            setEffectsHint("Overriding auto-enable", 150);
+        }
+        else
+        {
+            manualEffectsOverrideAutoEnable = false;
+            setEffectsHint({}, 0);
+        }
+    }
+}
+
 void MainComponent::setUpdateStatus(const juce::String& text, bool warning)
 {
     updateStatusLabel.setColour(juce::Label::textColourId, warning ? juce::Colour(0xffffb3b3) : kUiTextMuted);
@@ -1894,140 +2016,147 @@ void MainComponent::triggerUpdateCheck(bool manualTrigger)
             });
         };
 
-        juce::String latestVersion;
-        juce::String installerUrl;
-        bool hasUpdate = false;
-
+        try
         {
-            juce::URL api("https://api.github.com/repos/softlynn/Fizzle/releases/latest");
-            auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
-                               .withExtraHeaders("User-Agent: Fizzle\r\nAccept: application/vnd.github+json\r\n")
-                               .withConnectionTimeoutMs(12000)
-                               .withNumRedirectsToFollow(4);
-            auto in = api.createInputStream(options);
-            if (in == nullptr)
-            {
-                finish("Could not contact update server.", true, {});
-                return;
-            }
+            juce::String latestVersion;
+            juce::String installerUrl;
+            bool hasUpdate = false;
 
-            const auto jsonText = in->readEntireStreamAsString();
-            const auto parsed = juce::JSON::parse(jsonText);
-            auto* root = parsed.getDynamicObject();
-            if (root == nullptr)
             {
-                finish("Update response was invalid.", true, {});
-                return;
-            }
-
-            const auto tag = root->getProperty("tag_name").toString();
-            latestVersion = normalizeVersionTag(tag);
-            hasUpdate = compareSemver(latestVersion, FIZZLE_VERSION) > 0;
-
-            if (hasUpdate)
-            {
-                if (auto* assets = root->getProperty("assets").getArray())
+                juce::URL api("https://api.github.com/repos/softlynn/Fizzle/releases/latest");
+                auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                                   .withExtraHeaders("User-Agent: Fizzle\r\nAccept: application/vnd.github+json\r\n")
+                                   .withConnectionTimeoutMs(12000)
+                                   .withNumRedirectsToFollow(4);
+                auto in = api.createInputStream(options);
+                if (in == nullptr)
                 {
-                    for (const auto& av : *assets)
+                    finish("Could not contact update server.", true, {});
+                    return;
+                }
+
+                const auto jsonText = in->readEntireStreamAsString();
+                const auto parsed = juce::JSON::parse(jsonText);
+                auto* root = parsed.getDynamicObject();
+                if (root == nullptr)
+                {
+                    finish("Update response was invalid.", true, {});
+                    return;
+                }
+
+                const auto tag = root->getProperty("tag_name").toString();
+                latestVersion = normalizeVersionTag(tag);
+                hasUpdate = compareSemver(latestVersion, FIZZLE_VERSION) > 0;
+                Logger::instance().log("Update check current=" + juce::String(FIZZLE_VERSION)
+                                       + " latest=" + latestVersion
+                                       + " hasUpdate=" + juce::String(hasUpdate ? 1 : 0));
+
+                if (hasUpdate)
+                {
+                    if (auto* assets = root->getProperty("assets").getArray())
                     {
-                        auto* ao = av.getDynamicObject();
-                        if (ao == nullptr)
-                            continue;
-                        const auto name = ao->getProperty("name").toString();
-                        const auto url = ao->getProperty("browser_download_url").toString();
-                        if (name.endsWithIgnoreCase(".exe") && url.isNotEmpty())
+                        for (const auto& av : *assets)
                         {
-                            installerUrl = url;
-                            break;
+                            auto* ao = av.getDynamicObject();
+                            if (ao == nullptr)
+                                continue;
+                            const auto name = ao->getProperty("name").toString();
+                            const auto url = ao->getProperty("browser_download_url").toString();
+                            if (name.endsWithIgnoreCase(".exe") && url.isNotEmpty())
+                            {
+                                installerUrl = url;
+                                break;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if (! hasUpdate)
-        {
-            const auto msgPrefix = manualTrigger ? "No update found. " : juce::String{};
-            finish(msgPrefix + "You're up to date (" + juce::String(FIZZLE_VERSION) + ").", false, latestVersion);
-            return;
-        }
-
-        if (! autoInstall || installerUrl.isEmpty())
-        {
-            auto msg = "Update available: v" + latestVersion;
-            if (! autoInstall)
-                msg << " (enable auto-install to update automatically)";
-            else if (installerUrl.isEmpty())
-                msg << " (installer asset missing on release)";
-            finish(msg, false, latestVersion);
-            return;
-        }
-
-        auto downloadsDir = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("Downloads");
-        downloadsDir.createDirectory();
-        auto outFile = downloadsDir.getChildFile("Fizzle-Setup-" + latestVersion + ".exe");
-
-        juce::URL dl(installerUrl);
-        auto dlOptions = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
-                             .withExtraHeaders("User-Agent: Fizzle\r\n")
-                             .withConnectionTimeoutMs(30000)
-                             .withNumRedirectsToFollow(4);
-        auto dlIn = dl.createInputStream(dlOptions);
-        if (dlIn == nullptr)
-        {
-            finish("Update found, but download failed to start.", true, latestVersion);
-            return;
-        }
-
-        juce::TemporaryFile temp(outFile);
-        {
-            juce::FileOutputStream out(temp.getFile());
-            if (! out.openedOk())
+            if (! hasUpdate)
             {
-                finish("Update download failed (cannot write file).", true, latestVersion);
+                const auto msgPrefix = manualTrigger ? "No update found. " : juce::String{};
+                finish(msgPrefix + "You're up to date (" + juce::String(FIZZLE_VERSION) + ").", false, latestVersion);
                 return;
             }
-            const auto bytesWritten = out.writeFromInputStream(*dlIn, -1);
-            out.flush();
-            if (bytesWritten <= 0)
+
+            if (! autoInstall || installerUrl.isEmpty())
             {
-                finish("Update download failed (empty response).", true, latestVersion);
+                auto msg = "Update available: v" + latestVersion;
+                if (! autoInstall)
+                    msg << " (enable auto-install to update automatically)";
+                else if (installerUrl.isEmpty())
+                    msg << " (installer asset missing on release)";
+                finish(msg, false, latestVersion);
                 return;
             }
-        }
 
-        if (! temp.overwriteTargetFileWithTemporary())
-        {
-            finish("Update download failed (finalize error).", true, latestVersion);
-            return;
-        }
+            auto downloadsDir = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("Downloads");
+            downloadsDir.createDirectory();
+            auto outFile = downloadsDir.getChildFile("Fizzle-Setup-" + latestVersion + ".exe");
 
-        bool launchedInstaller = false;
+            juce::URL dl(installerUrl);
+            auto dlOptions = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                                 .withExtraHeaders("User-Agent: Fizzle\r\n")
+                                 .withConnectionTimeoutMs(30000)
+                                 .withNumRedirectsToFollow(4);
+            auto dlIn = dl.createInputStream(dlOptions);
+            if (dlIn == nullptr)
+            {
+                finish("Update found, but download failed to start.", true, latestVersion);
+                return;
+            }
+
+            juce::TemporaryFile temp(outFile);
+            {
+                juce::FileOutputStream out(temp.getFile());
+                if (! out.openedOk())
+                {
+                    finish("Update download failed (cannot write file).", true, latestVersion);
+                    return;
+                }
+                const auto bytesWritten = out.writeFromInputStream(*dlIn, -1);
+                out.flush();
+                if (bytesWritten <= 0)
+                {
+                    finish("Update download failed (empty response).", true, latestVersion);
+                    return;
+                }
+            }
+
+            if (! temp.overwriteTargetFileWithTemporary())
+            {
+                finish("Update download failed (finalize error).", true, latestVersion);
+                return;
+            }
+
+            bool launchedInstaller = false;
 #if JUCE_WINDOWS
-        const auto params = juce::String("/VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS");
-        const auto launchResult = reinterpret_cast<intptr_t>(ShellExecuteW(nullptr,
-                                                                           L"open",
-                                                                           outFile.getFullPathName().toWideCharPointer(),
-                                                                           params.toWideCharPointer(),
-                                                                           nullptr,
-                                                                           SW_SHOWNORMAL));
-        launchedInstaller = (launchResult > 32);
+            const auto params = juce::String("/VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /RESTARTAPPLICATIONS");
+            const auto launchResult = reinterpret_cast<intptr_t>(ShellExecuteW(nullptr,
+                                                                               L"open",
+                                                                               outFile.getFullPathName().toWideCharPointer(),
+                                                                               params.toWideCharPointer(),
+                                                                               nullptr,
+                                                                               SW_SHOWNORMAL));
+            launchedInstaller = (launchResult > 32);
 #endif
 
-        if (! launchedInstaller)
-        {
-            finish("Update downloaded, but installer launch failed. File: " + outFile.getFullPathName(), true, latestVersion);
-            return;
-        }
-
-        finish("Installing update v" + latestVersion + "...", false, latestVersion);
-        juce::MessageManager::callAsync([safeThis]
-        {
-            if (safeThis == nullptr)
+            if (! launchedInstaller)
+            {
+                finish("Update downloaded, but installer launch failed. File: " + outFile.getFullPathName(), true, latestVersion);
                 return;
-            if (auto* app = juce::JUCEApplicationBase::getInstance())
-                app->systemRequestedQuit();
-        });
+            }
+
+            finish("Installing update v" + latestVersion + "...", false, latestVersion);
+        }
+        catch (const std::exception& ex)
+        {
+            finish("Update check failed: " + juce::String(ex.what()), true, {});
+        }
+        catch (...)
+        {
+            finish("Update check failed.", true, {});
+        }
     }).detach();
 }
 
@@ -2407,40 +2536,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
     else if (button == &effectsToggle)
     {
-        const auto enabled = effectsToggle.getToggleState();
-        effectsToggle.setButtonText(enabled ? "Effects On" : "Effects Off");
-        params.bypass.store(! enabled);
-        manualEffectsPinnedOn = enabled && cachedSettings.autoEnableByApp;
-
-        if (! cachedSettings.autoEnableByApp)
-        {
-            manualEffectsOverrideAutoEnable = false;
-            setEffectsHint({}, 0);
-            return;
-        }
-
-        bool hasCondition = false;
-        const auto autoWantsEnabled = computeAutoEnableShouldEnable(hasCondition);
-
-        if (enabled)
-        {
-            // Manual ON must always work, even while auto-enable is active.
-            manualEffectsOverrideAutoEnable = false;
-            setEffectsHint({}, 0);
-        }
-        else
-        {
-            if (hasCondition && autoWantsEnabled)
-            {
-                manualEffectsOverrideAutoEnable = true;
-                setEffectsHint("Overriding auto-enable", 150);
-            }
-            else
-            {
-                manualEffectsOverrideAutoEnable = false;
-                setEffectsHint({}, 0);
-            }
-        }
+        applyEffectsEnabledState(effectsToggle.getToggleState(), true);
     }
     else if (button == &settingsButton)
     {
@@ -2665,17 +2761,30 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 
 void MainComponent::timerCallback()
 {
-    uiPulse += 0.03f;
     ++uiTickCount;
+    if (! draggingWindow)
+        uiPulse += 0.022f;
+
     auto d = engine.getDiagnostics();
     meterIn.setLevel(d.inputLevel);
     meterOut.setLevel(d.outputLevel);
-    sampleRateValueLabel.setText(juce::String(d.sampleRate / 1000.0, 1) + " kHz", juce::dontSendNotification);
+
+    if (std::abs(d.sampleRate - lastDisplayedSampleRateHz) > 1.0)
+    {
+        lastDisplayedSampleRateHz = d.sampleRate;
+        sampleRateValueLabel.setText(juce::String(d.sampleRate / 1000.0, 1) + " kHz", juce::dontSendNotification);
+    }
+
     const auto out = getSelectedOutputDeviceName();
     const bool virt = isVirtualMicName(out);
-    virtualMicStatusLabel.setText(virt ? "Fizzle Mic: routed" : "Fizzle Mic: not routed", juce::dontSendNotification);
+    const juce::String currentVirtualStatus = virt ? "Fizzle Mic: routed" : "Fizzle Mic: not routed";
+    if (currentVirtualStatus != lastVirtualMicStatus)
+    {
+        lastVirtualMicStatus = currentVirtualStatus;
+        virtualMicStatusLabel.setText(currentVirtualStatus, juce::dontSendNotification);
+    }
 
-    if (cachedSettings.autoEnableByApp && (uiTickCount % 30 == 0))
+    if (cachedSettings.autoEnableByApp && (uiTickCount % 20 == 0))
     {
         bool hasCondition = false;
         const auto shouldEnable = computeAutoEnableShouldEnable(hasCondition);
@@ -2737,6 +2846,10 @@ void MainComponent::timerCallback()
         }
     }
 
+    const auto listenEnabled = engine.isListenEnabled();
+    const bool listenStateChanged = (listenEnabled != lastListenEnabledState);
+    lastListenEnabledState = listenEnabled;
+
     if (effectsHintTicks > 0)
     {
         --effectsHintTicks;
@@ -2744,12 +2857,15 @@ void MainComponent::timerCallback()
             effectsHintLabel.setText({}, juce::dontSendNotification);
     }
 
+    bool settingsAlphaChanged = false;
     if (settingsPanel != nullptr)
     {
         const auto target = settingsPanelTargetVisible ? 1.0f : 0.0f;
+        const auto before = settingsPanelAlpha;
         settingsPanelAlpha += (target - settingsPanelAlpha) * 0.55f;
         if (std::abs(settingsPanelAlpha - target) < 0.01f)
             settingsPanelAlpha = target;
+        settingsAlphaChanged = std::abs(settingsPanelAlpha - before) > 0.001f;
 
         settingsPanel->setAlpha(settingsPanelAlpha);
         if (! settingsPanelTargetVisible && settingsPanelAlpha <= 0.01f)
@@ -2765,7 +2881,23 @@ void MainComponent::timerCallback()
     if (aboutFlashAlpha < 0.01f)
         aboutFlashAlpha = 0.0f;
 
-    repaint();
+    if (draggingWindow)
+        return;
+
+    auto dirty = headerBounds.expanded(20, 8)
+                     .getUnion(routeSpeakersButton.getBounds().expanded(12, 6));
+
+    if (savePresetFlashAlpha > 0.0f)
+        dirty = dirty.getUnion(savePresetButton.getBounds().expanded(6, 4));
+    if (aboutFlashAlpha > 0.0f)
+        dirty = dirty.getUnion(aboutButton.getBounds().expanded(6, 4));
+    if (listenStateChanged)
+        dirty = dirty.getUnion(routeSpeakersButton.getBounds().expanded(10, 6));
+
+    if (settingsAlphaChanged && settingsPanel != nullptr && settingsPanel->isVisible())
+        settingsPanel->repaint();
+
+    repaint(dirty);
 }
 
 int MainComponent::getNumRows()
@@ -2818,20 +2950,23 @@ void MainComponent::paint(juce::Graphics& g)
     auto shellPath = makePanelPath(shell, shellRadius);
     g.reduceClipRegion(shellPath);
 
-    const auto pulse = 0.5f + 0.5f * std::sin(uiPulse * 0.6f);
     juce::ColourGradient bg(kUiBg.brighter(0.08f), shell.getX(), shell.getY(),
                             kUiBg.darker(0.22f), shell.getX(), shell.getBottom(), false);
     g.setGradientFill(bg);
     g.fillRect(getLocalBounds());
+    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.028f);
+    g.fillRect(shell.toNearestInt());
 
     auto outer = shell.expanded(1.5f, 1.0f);
-    g.setColour(kUiAccent.withAlpha(0.035f + pulse * 0.015f));
+    g.setColour(kUiAccent.withAlpha(0.045f));
     g.strokePath(makePanelPath(outer, shellRadius + 1.5f), juce::PathStrokeType(1.2f));
 
     auto card = shell.reduced(2.4f, 0.7f);
     juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(0.9f), card.getX(), card.getY(),
                                   kUiPanel.withAlpha(0.95f), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
+    g.fillPath(makePanelPath(card, 21.0f));
+    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.018f);
     g.fillPath(makePanelPath(card, 21.0f));
 
     auto header = headerBounds.toFloat().expanded(1.5f, 0.5f);
@@ -2853,24 +2988,10 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);
 
-    g.setColour(kUiAccent.withAlpha(0.055f + pulse * 0.016f));
+    g.setColour(kUiAccent.withAlpha(0.064f));
     g.strokePath(makePanelPath(shell.reduced(0.9f, 0.0f), shellRadius - 0.8f), juce::PathStrokeType(0.95f));
-    g.setColour(kUiAccentSoft.withAlpha(0.016f + pulse * 0.008f));
+    g.setColour(kUiAccentSoft.withAlpha(0.022f));
     g.strokePath(makePanelPath(shell.expanded(1.4f, 0.4f), shellRadius + 1.2f), juce::PathStrokeType(0.9f));
-
-    const auto dividerY = header.getBottom() + 1.6f;
-    const auto dividerX = card.getX() + 14.0f;
-    const auto dividerW = card.getWidth() - 28.0f;
-    g.setColour(kUiAccent.withAlpha(0.028f));
-    g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.0f);
-    const auto loopWidth = dividerW + 180.0f;
-    const auto phase = std::fmod(uiPulse * 96.0f, loopWidth);
-    const auto x0 = dividerX - 60.0f + phase;
-    juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
-                               kUiAccentSoft.withAlpha(0.25f), x0 + 72.0f, dividerY, false);
-    sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
-    g.setGradientFill(sweep);
-    g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.0f, dividerW, 2.0f));
 
     if (appLogo.isValid() && ! headerLogoBounds.isEmpty())
     {
@@ -2910,6 +3031,26 @@ void MainComponent::paint(juce::Graphics& g)
         g.fillEllipse(fizzleMicIcon.getX() + 1.0f, fizzleMicIcon.getCentreY() - 1.3f, 2.5f, 2.5f);
     }
 
+}
+
+void MainComponent::paintOverChildren(juce::Graphics& g)
+{
+    const auto header = headerBounds.toFloat();
+    const auto dividerY = header.getBottom() + 1.6f;
+    const auto dividerX = header.getX() + 14.0f;
+    const auto dividerW = header.getWidth() - 28.0f;
+    g.setColour(kUiAccent.withAlpha(0.028f));
+    g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.0f);
+
+    const auto loopWidth = dividerW + 180.0f;
+    const auto phase = std::fmod(uiPulse * 96.0f, loopWidth);
+    const auto x0 = dividerX - 60.0f + phase;
+    juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
+                               kUiAccentSoft.withAlpha(0.25f), x0 + 72.0f, dividerY, false);
+    sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
+    g.setGradientFill(sweep);
+    g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.0f, dividerW, 2.0f));
+
     if (engine.isListenEnabled())
     {
         auto lb = routeSpeakersButton.getBounds().toFloat();
@@ -2925,18 +3066,13 @@ void MainComponent::paint(juce::Graphics& g)
         if (alpha <= 0.0f)
             return;
         auto bounds = button.getBounds().toFloat().expanded(1.8f, 1.2f);
-        g.setColour(kUiSalmon.withAlpha(0.10f * alpha));
+        g.setColour(kUiAccent.withAlpha(0.11f * alpha));
         g.fillRoundedRectangle(bounds, 12.0f);
-        g.setColour(kUiSalmon.withAlpha(0.24f * alpha));
+        g.setColour(kUiAccentSoft.withAlpha(0.22f * alpha));
         g.drawRoundedRectangle(bounds, 12.0f, 1.2f);
     };
     drawFlash(savePresetButton, savePresetFlashAlpha);
     drawFlash(aboutButton, aboutFlashAlpha);
-
-    if (settingsPanel != nullptr && settingsPanel->isVisible())
-    {
-        return;
-    }
 }
 
 void MainComponent::resized()

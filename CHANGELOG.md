@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.6 - Tray Control + Visual Stability Pass
+
+### Fixed
+- Tray menu actions now route through the main UI logic so `Enable/Bypass`, `Mute`, `Restart Audio`, and preset selection reliably apply in-app and in audio behavior.
+- Reduced gradient color banding in both app surfaces and tray menu backgrounds using subtle dithering/noise overlays.
+- Settings overlay dimming is now clipped to the rounded app shell (no dark overspill to the window border).
+- Improved top-right window controls with cleaner capsule styling and stronger hover/press feedback.
+
+### Changed
+- Rebalanced warm accent usage to better match the existing blue glass theme and border treatment.
+
 ## v0.1.5 - In-Depth Header Integration
 
 ### Fixed

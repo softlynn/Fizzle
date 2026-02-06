@@ -12,6 +12,25 @@ const juce::Colour kTrayMuted(0xff8aa1c8);
 const juce::Colour kTrayAccent(0xff73c0ff);
 const juce::Colour kTrayHover(0x3058a8ff);
 
+const juce::Image& getMenuNoiseTile()
+{
+    static juce::Image tile = []()
+    {
+        juce::Image img(juce::Image::ARGB, 48, 48, true);
+        juce::Random random(0xF17713);
+        for (int y = 0; y < img.getHeight(); ++y)
+        {
+            for (int x = 0; x < img.getWidth(); ++x)
+            {
+                const auto v = static_cast<uint8_t>(130 + random.nextInt(21) - 10);
+                img.setPixelAt(x, y, juce::Colour(v, v, v));
+            }
+        }
+        return img;
+    }();
+    return tile;
+}
+
 class TrayMenuLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
@@ -40,6 +59,8 @@ public:
         juce::ColourGradient fill(kTrayPanel, r.getX(), r.getY(),
                                   kTrayBg, r.getX(), r.getBottom(), false);
         g.setGradientFill(fill);
+        g.fillRect(r);
+        g.setTiledImageFill(getMenuNoiseTile(), 0, 0, 0.05f);
         g.fillRect(r);
 
         g.setColour(kTrayAccent.withAlpha(0.06f));

@@ -23,6 +23,7 @@ public:
 
     void resized() override;
     void paint(juce::Graphics& g) override;
+    void paintOverChildren(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
@@ -30,6 +31,10 @@ public:
 
     void refreshPresets();
     void onWindowVisible();
+    void trayToggleEffectsBypass();
+    void trayToggleMute();
+    void trayRestartAudio();
+    void trayLoadPreset(const juce::String& name);
 
 private:
     class ProgramListModel;
@@ -159,6 +164,9 @@ private:
     std::vector<RunningAppEntry> runningApps;
     juce::StringArray outputDeviceRealNames;
     juce::Image appLogo;
+    juce::String lastVirtualMicStatus;
+    double lastDisplayedSampleRateHz { 0.0 };
+    bool lastListenEnabledState { false };
 
     void buttonClicked(juce::Button* button) override;
     void comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged) override;
@@ -211,5 +219,6 @@ private:
     void triggerButtonFlash(juce::Button* button);
     void applyWindowsStartupSetting();
     void toggleWindowMaximize();
+    void applyEffectsEnabledState(bool enabled, bool fromUserToggle);
 };
 }
