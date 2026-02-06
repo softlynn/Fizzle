@@ -5,7 +5,7 @@
 <h1 align="center">Fizzle</h1>
 
 <p align="center">
-  Clean, tray-friendly microphone FX for Windows.
+  Clean, tray-friendly microphone FX for Windows with a polished liquid-glass interface.
 </p>
 
 <p align="center">
@@ -19,6 +19,7 @@
 - Lets you load and reorder VST3 plugins.
 - Runs from the tray with quick controls.
 - Saves presets so you can switch setups fast.
+- Includes a first-launch quick tutorial in the app.
 
 ## 🚀 Install
 
