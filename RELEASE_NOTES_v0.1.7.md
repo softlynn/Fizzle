@@ -1,15 +1,19 @@
-# Fizzle v0.1.7
+## Fizzle v0.1.7
 
-## Highlights
-- Added more buffer-size options for latency/CPU tuning: `64`, `96`, `128`, `192`, `256`, `384`, `512`, `1024`.
-- Improved buffer-value persistence in UI/presets so custom sizes stay selected correctly.
-- Listen mode now better identifies Bluetooth earbuds/headsets when auto-picking a monitor output.
-- Listen monitor setup now prefers the active processing sample rate and buffer size when supported.
-- Reduced monitor lag buildup by trimming stale queued listen audio when callback backlog occurs.
+This update focuses on tray control clarity, header integration, and UI behavior polish.
 
-## Notes
-- Bluetooth earbuds on Windows still have codec/transport latency that cannot be fully removed in-app.
-- This release reduces avoidable app-side monitoring delay, but it does not eliminate Bluetooth baseline latency.
+### Highlights
+- Header/body visuals are now unified so the top bar no longer feels detached.
+- Tray menu now shows explicit toggle state for `Effects: On/Off` and `Mute`.
+- Mute status is now obvious in-app (persistent badge + hint) instead of briefly flashing.
+- Restart Audio now shows a loading/status overlay for clearer feedback.
+- Settings overlay now closes when clicking outside the settings panel.
+- VST row dragging is cleaner:
+  - dragged row stays in front,
+  - row controls no longer trigger accidental drag,
+  - reorder operation is more stable.
+- Tray menu border/transparency rendering has been cleaned up.
 
-## Installer
-- `Fizzle-Setup-0.1.7.exe`
+### Audio Reliability
+- Monitor setup now retries with default settings if preferred monitor setup fails.
+- Monitor queue trims stale buffered audio under backlog conditions to reduce listen drift.
