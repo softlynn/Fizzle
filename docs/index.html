@@ -4,72 +4,133 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Fizzle</title>
-  <meta name="description" content="Fizzle is a clean Windows microphone effects app with presets, tray controls, and VST3 support." />
+  <meta name="description" content="Fizzle is a polished Windows microphone effects app with tray controls, presets, and VST3 support." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="backdrop" aria-hidden="true">
-    <div class="blob b1"></div>
-    <div class="blob b2"></div>
-    <div class="blob b3"></div>
-    <div class="grain"></div>
+  <div class="bg" aria-hidden="true">
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="orb orb-c"></div>
+    <div class="noise"></div>
   </div>
 
-  <main class="shell">
-    <header class="hero reveal">
-      <div class="logo-wrap">
-        <img src="assets/logo.png" alt="Fizzle logo" class="logo" />
-      </div>
-      <div class="hero-text">
-        <p class="eyebrow">Windows Mic FX</p>
-        <h1>Fizzle</h1>
-        <p class="subtitle">Beautifully simple microphone processing with tray controls, presets, and VST3 plugins.</p>
-        <div class="actions">
-          <a id="downloadBtn" class="btn btn-primary" href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Download Latest</a>
-          <a class="btn btn-soft" href="https://github.com/softlynn/Fizzle" target="_blank" rel="noopener noreferrer">GitHub</a>
+  <header class="topbar reveal">
+    <a class="brand" href="#top" aria-label="Fizzle Home">
+      <img src="assets/logo.png" alt="Fizzle logo" />
+      <span>Fizzle</span>
+    </a>
+    <nav class="links">
+      <a href="#install">Install</a>
+      <a href="#use">How to Use</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn mini" href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Download</a>
+  </header>
+
+  <main id="top" class="layout">
+    <section class="hero reveal">
+      <div class="hero-copy">
+        <p class="tag">Windows Mic Effects</p>
+        <h1>Sound better in seconds.</h1>
+        <p class="lead">Fizzle gives you a smooth, tray-friendly workflow for microphone processing with VST3 plugins, presets, and low-latency routing.</p>
+        <div class="cta-row">
+          <a id="downloadBtn" class="btn primary" href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Get Latest Release</a>
+          <a class="btn ghost" href="https://github.com/softlynn/Fizzle" target="_blank" rel="noopener noreferrer">View GitHub</a>
+        </div>
+        <div class="chip-row">
+          <span class="chip">Tray-first</span>
+          <span class="chip">Preset Ready</span>
+          <span class="chip">VST3 Chain</span>
         </div>
       </div>
-    </header>
 
-    <section class="panel reveal">
-      <h2>Install in 3 Steps</h2>
-      <ol class="steps">
-        <li><span>1</span>Download the latest installer.</li>
-        <li><span>2</span>Run <strong>Fizzle-Setup</strong>.</li>
-        <li><span>3</span>Open Fizzle and follow the first-launch guide.</li>
-      </ol>
+      <aside class="hero-card" id="tiltCard">
+        <div class="card-glow"></div>
+        <div class="card-head">
+          <img src="assets/logo.png" alt="Fizzle" />
+          <div>
+            <strong>Fizzle</strong>
+            <p>Realtime mic processing</p>
+          </div>
+        </div>
+        <ul>
+          <li><span>Input</span><strong>Your Microphone</strong></li>
+          <li><span>FX</span><strong>VST3 Chain + Presets</strong></li>
+          <li><span>Output</span><strong>Virtual Mic Device</strong></li>
+        </ul>
+      </aside>
     </section>
 
-    <section class="grid">
+    <section id="install" class="panel reveal">
+      <h2>Install</h2>
+      <div class="steps">
+        <article>
+          <span>1</span>
+          <h3>Download</h3>
+          <p>Grab the latest installer build from Releases.</p>
+        </article>
+        <article>
+          <span>2</span>
+          <h3>Run Setup</h3>
+          <p>Launch the installer and finish setup.</p>
+        </article>
+        <article>
+          <span>3</span>
+          <h3>Open Fizzle</h3>
+          <p>Start from Desktop or Start Menu and follow the first-launch guide.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="use" class="grid">
       <article class="card reveal">
         <h3>First Launch</h3>
-        <p>Pick your input mic, choose your virtual output, turn Effects On, then add your VST3 plugins.</p>
+        <p>Select your input mic, choose your virtual output, turn Effects On, and add your VST3 plugins.</p>
       </article>
       <article class="card reveal">
-        <h3>Everyday Use</h3>
-        <p>Open from tray, switch presets fast, and use Restart Audio when your device setup changes.</p>
+        <h3>Daily Workflow</h3>
+        <p>Open from tray, switch presets quickly, and use Restart Audio whenever your device list changes.</p>
       </article>
       <article class="card reveal">
-        <h3>Why People Like It</h3>
-        <p>Low-latency path, clean UI, smooth controls, and a workflow focused on fast voice setup.</p>
+        <h3>Smooth Control</h3>
+        <p>Reorder plugins, adjust wet/dry, and keep a clean low-noise signal path.</p>
       </article>
       <article class="card reveal">
         <h3>Troubleshooting</h3>
-        <p>If audio crackles, increase buffer size. If apps hear the wrong mic, re-check input/output selection.</p>
+        <p>If you hear crackles, raise buffer size. If apps don’t hear Fizzle, verify mic input selection inside that app.</p>
       </article>
     </section>
 
-    <footer class="footer reveal">
-      <a href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Latest Release</a>
-      <span>•</span>
-      <a href="https://github.com/softlynn/Fizzle" target="_blank" rel="noopener noreferrer">Repository</a>
-      <span>•</span>
-      <span>MIT License</span>
-    </footer>
+    <section id="faq" class="panel reveal">
+      <h2>Quick FAQ</h2>
+      <div class="faq">
+        <details>
+          <summary>Where do I get updates?</summary>
+          <p>Use the Download button above, or open the latest release page on GitHub.</p>
+        </details>
+        <details>
+          <summary>Can I keep Fizzle running in the tray?</summary>
+          <p>Yes. Fizzle is designed for tray-first use so you can stay in your app/game.</p>
+        </details>
+        <details>
+          <summary>Do I need to configure everything every time?</summary>
+          <p>No. Save presets once and switch instantly when needed.</p>
+        </details>
+      </div>
+    </section>
   </main>
+
+  <footer class="foot reveal">
+    <a href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Latest Release</a>
+    <span>•</span>
+    <a href="https://github.com/softlynn/Fizzle" target="_blank" rel="noopener noreferrer">Repository</a>
+    <span>•</span>
+    <span>MIT License</span>
+  </footer>
 
   <script src="app.js"></script>
 </body>

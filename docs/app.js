@@ -3,24 +3,44 @@
   const io = new IntersectionObserver((entries) => {
     entries.forEach((entry, i) => {
       if (!entry.isIntersecting) return;
-      setTimeout(() => entry.target.classList.add('show'), i * 45);
+      setTimeout(() => entry.target.classList.add('show'), i * 55);
       io.unobserve(entry.target);
     });
-  }, { threshold: 0.12 });
+  }, { threshold: 0.14 });
 
-  reveals.forEach((el) => io.observe(el));
+  reveals.forEach((node) => io.observe(node));
 
-  const btn = document.getElementById('downloadBtn');
-  if (btn) {
-    btn.addEventListener('mousemove', (e) => {
-      const r = btn.getBoundingClientRect();
-      const x = e.clientX - r.left;
-      const y = e.clientY - r.top;
-      btn.style.background = `radial-gradient(circle at ${x}px ${y}px, #b4e6ff 0%, #7ec7ff 40%, #62b3ff 70%)`;
+  const cta = document.getElementById('downloadBtn');
+  if (cta) {
+    cta.addEventListener('mousemove', (event) => {
+      const rect = cta.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      cta.style.background = `radial-gradient(circle at ${x}px ${y}px, #c4edff 0%, #89ccff 42%, #63b6ff 72%)`;
     });
 
-    btn.addEventListener('mouseleave', () => {
-      btn.style.background = 'linear-gradient(90deg, #64b3ff, #8ed3ff)';
+    cta.addEventListener('mouseleave', () => {
+      cta.style.background = 'linear-gradient(90deg, #6dbbff, #a4ddff)';
+    });
+  }
+
+  const tiltCard = document.getElementById('tiltCard');
+  if (tiltCard && window.matchMedia('(pointer:fine)').matches) {
+    const damp = 12;
+
+    tiltCard.addEventListener('mousemove', (event) => {
+      const rect = tiltCard.getBoundingClientRect();
+      const px = (event.clientX - rect.left) / rect.width;
+      const py = (event.clientY - rect.top) / rect.height;
+
+      const rx = (0.5 - py) * damp;
+      const ry = (px - 0.5) * damp;
+
+      tiltCard.style.transform = `perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) translateZ(0)`;
+    });
+
+    tiltCard.addEventListener('mouseleave', () => {
+      tiltCard.style.transform = 'perspective(900px) rotateX(0deg) rotateY(0deg)';
     });
   }
 })();
