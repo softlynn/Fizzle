@@ -677,6 +677,34 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     if (cachedSettings.lastPresetName.isNotEmpty() && cachedSettings.lastPresetName != "Default")
         loadPresetByName(cachedSettings.lastPresetName);
     markCurrentPresetSnapshot();
+
+    if (! cachedSettings.hasSeenFirstLaunchGuide)
+    {
+        cachedSettings.hasSeenFirstLaunchGuide = true;
+        saveCachedSettings();
+
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis == nullptr)
+                return;
+
+            const juce::String guide =
+                "Welcome to Fizzle!\n\n"
+                "Quick setup:\n"
+                "1) Select your microphone in Input Mic.\n"
+                "2) Select CABLE Input (VB-Audio Virtual Cable) in Virtual Mic Output.\n"
+                "3) Turn Effects On.\n"
+                "4) Pick a VST3 from the detected list to add it.\n"
+                "5) Use Listen if you want local monitoring.\n\n"
+                "Tip: Save a preset after your first good setup.";
+
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+                                                   "First Launch Guide",
+                                                   guide);
+        });
+    }
+
     startTimerHz(30);
 }
 

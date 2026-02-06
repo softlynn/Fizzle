@@ -1,142 +1,65 @@
-# Fizzle
+<p align="center">
+  <img src="resources/icon/app.png" alt="Fizzle Logo" width="120" />
+</p>
 
-![Fizzle Logo](resources/icon/app.png)
+<h1 align="center">Fizzle</h1>
 
-Fizzle is a tray-first Windows microphone processing app for VRChat, Discord, and Codex voice input. It captures your mic, runs a realtime VST3 chain, and routes to a virtual mic device with low latency.
+<p align="center">
+  Clean, tray-friendly microphone FX for Windows.
+</p>
 
-## Highlights
+<p align="center">
+  <a href="https://github.com/softlynn/Fizzle/releases/latest"><img alt="Download Latest" src="https://img.shields.io/badge/Download-Latest%20Release-2ea44f?style=for-the-badge" /></a>
+  <a href="https://softlynn.github.io/Fizzle/"><img alt="Website" src="https://img.shields.io/badge/Open-Website-1f6feb?style=for-the-badge" /></a>
+</p>
 
-- Windows desktop app built with C++ and JUCE.
-- Tray-first workflow with quick menu actions.
-- WASAPI shared mode (no exclusive device lock).
-- VST3 chain with enable/disable, wet/dry, editor open, drag reorder.
-- Presets stored as JSON.
-- App settings and logs in `%APPDATA%\Fizzle`.
-- Inno Setup installer with Start Menu integration.
-- Unit tests for DSP basics and Windows CI build.
+## ✨ What Fizzle Does
 
-## Repository Layout
+- Routes your mic through your selected effect chain.
+- Lets you load and reorder VST3 plugins.
+- Runs from the tray with quick controls.
+- Saves presets so you can switch setups fast.
 
-- `CMakeLists.txt` - root build configuration.
-- `cmake/` - compiler/version helper modules.
-- `src/` - app, UI, audio engine, VST host.
-- `tests/` - unit tests.
-- `installer/` - Inno Setup script and packaging files.
-- `resources/icon/` - app logo/icon assets.
-- `.github/workflows/windows-build.yml` - CI workflow.
+## 🚀 Install
 
-## Build (Windows 11, Visual Studio 2022)
+1. Click **Download Latest Release** above.
+2. Run the installer (`Fizzle-Setup-...exe`).
+3. Open Fizzle from Start Menu or Desktop shortcut.
 
-```powershell
-cmake -S . -B build-x64 -G "Visual Studio 17 2022" -A x64
-cmake --build build-x64 --config Release --target Fizzle
-cmake --build build-x64 --config Release --target FizzleTests
-ctest --test-dir build-x64 -C Release --output-on-failure
-```
+## 🎛️ First-Time Setup
 
-Shortcut script:
+On first launch, Fizzle shows a quick in-app guide.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1
-```
+If you skip it, use this:
 
-Binary:
+1. Choose your mic in **Input Mic**.
+2. Choose your virtual mic in **Virtual Mic Output**.
+3. Turn **Effects On**.
+4. Add your VST3 plugin(s).
+5. Save a preset.
 
-- `build-x64/Fizzle_artefacts/Release/Fizzle.exe`
+## 🧩 Everyday Use
 
-## Run
+- Open from tray icon.
+- Toggle **Effects On/Off** quickly.
+- Change preset from the **Preset** dropdown.
+- Use **Restart Audio** if your device changes.
 
-```powershell
-.\build-x64\Fizzle_artefacts\Release\Fizzle.exe --show
-```
+## 🛠️ Troubleshooting
 
-## Build Installer
+- No processed mic in apps:
+  - Check your app’s microphone input selection.
+  - Confirm the same virtual mic selected in Fizzle is selected in your app.
+- Crackles or pops:
+  - Increase Buffer Size (e.g., 256 or 512).
+- No sound in monitoring:
+  - Enable **Listen** and verify output device selection.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
-```
+## 🔗 Links
 
-Or compile directly with Inno Setup:
+- Website: https://softlynn.github.io/Fizzle/
+- Latest release: https://github.com/softlynn/Fizzle/releases/latest
 
-```powershell
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\Fizzle.iss
-```
+## 📄 License
 
-Output:
-
-- `installer/out/Fizzle-Setup-<version>.exe`
-
-## Icon Pipeline
-
-Primary icon files:
-
-- `resources/icon/app.png`
-- `resources/icon/app.ico`
-
-Regenerate icon assets from a source image:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\generate_logo_assets.ps1 -SourceImage "C:\path\to\logo.png"
-```
-
-These assets are used for:
-
-- executable/window icon
-- tray icon
-- installer icon
-- Start Menu and desktop shortcut icon
-
-## Usage
-
-1. Select your lav receiver in `Input Mic`.
-2. Set `Virtual Mic Output` to `CABLE Input (VB-Audio Virtual Cable)`.
-3. In VRChat/Codex select `CABLE Output` as microphone.
-4. Keep buffer at `256` for best latency/stability balance.
-
-## Diagnostics
-
-The diagnostics panel reports:
-
-- selected input/output devices
-- sample rate
-- buffer size
-- CPU load
-- estimated latency
-- dropped buffers
-
-## Troubleshooting
-
-- No sound:
-  - verify input/output selection
-  - confirm VB-Cable installation
-  - run `Test Tone`
-- Crackles:
-  - raise buffer size to `512`
-  - close heavy background apps
-- High latency:
-  - use `256` or `128` if stable
-  - prefer 48 kHz device config in Windows
-
-## Versioning
-
-Semantic versioning (`MAJOR.MINOR.PATCH`) is defined in `CMakeLists.txt`:
-
-- `project(Fizzle VERSION x.y.z)`
-
-## CI
-
-GitHub Actions builds and tests on Windows:
-
-- `.github/workflows/windows-build.yml`
-
-## Publish Checklist
-
-- [x] Build `Release` successfully
-- [x] Run unit tests
-- [x] Build installer
-- [x] Verify icon assets in `resources/icon/`
-- [x] Verify README and license present
-
-## License
-
-MIT (`LICENSE`)
+MIT
