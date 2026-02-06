@@ -24,9 +24,58 @@ const juce::Colour kUiTextMuted(0xffa8bbdd);
 const juce::Colour kUiAccent(0xff6dbbff);
 const juce::Colour kUiAccentSoft(0xffa4ddff);
 const juce::Colour kUiMint(0xff9af7d8);
-const juce::Colour kUiSalmon(0xff87a8d4);
+const juce::Colour kUiSalmon(0xfff08ea2);
 const juce::String kGithubRepoUrl("https://github.com/softlynn/Fizzle");
 const juce::String kWebsiteUrl("https://softlynn.github.io/Fizzle/");
+constexpr std::array<int, 8> kBufferSizeOptions { 64, 96, 128, 192, 256, 384, 512, 1024 };
+
+void populateBufferBox(juce::ComboBox& comboBox, int selectedBuffer)
+{
+    comboBox.clear();
+
+    auto target = selectedBuffer > 0 ? selectedBuffer : kDefaultBlockSize;
+    int selectedId = 0;
+    int id = 1;
+    for (const auto option : kBufferSizeOptions)
+    {
+        comboBox.addItem(juce::String(option), id);
+        if (option == target)
+            selectedId = id;
+        ++id;
+    }
+
+    if (selectedId == 0)
+    {
+        comboBox.addItem(juce::String(target), id);
+        selectedId = id;
+    }
+
+    comboBox.setSelectedId(selectedId, juce::dontSendNotification);
+}
+
+void syncBufferBoxSelection(juce::ComboBox& comboBox, int selectedBuffer)
+{
+    const auto target = juce::String(selectedBuffer > 0 ? selectedBuffer : kDefaultBlockSize);
+    int existingId = 0;
+    for (int i = 0; i < comboBox.getNumItems(); ++i)
+    {
+        if (comboBox.getItemText(i) == target)
+        {
+            existingId = comboBox.getItemId(i);
+            break;
+        }
+    }
+    if (existingId > 0)
+    {
+        comboBox.setSelectedId(existingId, juce::dontSendNotification);
+    }
+    else
+    {
+        const auto newId = comboBox.getNumItems() + 1;
+        comboBox.addItem(target, newId);
+        comboBox.setSelectedId(newId, juce::dontSendNotification);
+    }
+}
 
 juce::Image createDitherNoiseTile()
 {
@@ -448,17 +497,27 @@ public:
 class SettingsOverlay final : public juce::Component
 {
 public:
+    explicit SettingsOverlay(std::function<void()> dismissFn)
+        : dismiss(std::move(dismissFn))
+    {
+    }
+
+    juce::Rectangle<float> getPanelBounds() const
+    {
+        return getLocalBounds().toFloat().reduced(80.0f, 56.0f);
+    }
+
     void paint(juce::Graphics& g) override
     {
-        auto shell = getLocalBounds().toFloat().reduced(4.0f, 0.0f);
+        auto shell = getLocalBounds().toFloat().reduced(6.0f, 2.0f);
         juce::Path shellPath;
         shellPath.addRoundedRectangle(shell, 24.0f);
         g.reduceClipRegion(shellPath);
 
         g.setColour(juce::Colours::black.withAlpha(0.36f));
-        g.fillRect(shell.toNearestInt());
+        g.fillPath(shellPath);
 
-        auto panel = shell.reduced(76.0f, 56.0f);
+        auto panel = getPanelBounds();
         juce::ColourGradient fill(kUiPanelSoft.withAlpha(0.96f), panel.getX(), panel.getY(),
                                   kUiPanel.withAlpha(0.93f), panel.getX(), panel.getBottom(), false);
         g.setGradientFill(fill);
@@ -471,6 +530,15 @@ public:
         g.setColour(kUiAccent.withAlpha(0.22f));
         g.drawLine(sidebar.getRight(), panel.getY() + 8.0f, sidebar.getRight(), panel.getBottom() - 8.0f, 1.0f);
     }
+
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (! getPanelBounds().contains(e.position) && dismiss != nullptr)
+            dismiss();
+    }
+
+private:
+    std::function<void()> dismiss;
 };
 
 class PluginEditorWindow final : public juce::DocumentWindow
@@ -591,10 +659,11 @@ public:
     {
         if (auto* lb = findParentComponentOfClass<juce::ListBox>())
             lb->selectRow(row);
-        if (e.originalComponent == &mix || e.originalComponent == &enabled || e.originalComponent == &openButton)
+        if (isEventFromInteractiveControl(e))
             return;
         dragging = true;
         setInterceptsMouseClicks(true, true);
+        setAlwaysOnTop(true);
         toFront(true);
         startTimerHz(60);
         if (dragStart)
@@ -637,6 +706,7 @@ public:
         dragging = false;
         dragOffsetY = 0.0f;
         targetScale = 1.0f;
+        setAlwaysOnTop(false);
         startTimerHz(60);
         if (dragEnd)
             dragEnd(targetRow);
@@ -662,6 +732,18 @@ private:
     OpenFn open;
     MixFn setMix;
     ToggleFn toggle;
+
+    bool isEventFromInteractiveControl(const juce::MouseEvent& e) const
+    {
+        for (auto* c = e.eventComponent; c != nullptr; c = c->getParentComponent())
+        {
+            if (c == this)
+                break;
+            if (c == &mix || c == &enabled || c == &openButton)
+                return true;
+        }
+        return false;
+    }
 
     void buttonClicked(juce::Button* b) override
     {
@@ -690,6 +772,8 @@ private:
             currentScale = targetScale;
         if (dragging || currentScale != 1.0f)
         {
+            if (dragging)
+                toFront(false);
             setTransform(juce::AffineTransform::translation(0.0f, dragOffsetY)
                             .scaled(currentScale, currentScale, getWidth() * 0.5f, getHeight() * 0.5f));
             repaint();
@@ -735,9 +819,10 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     setLookAndFeel(&modern);
     appLogo = juce::ImageFileFormat::loadFrom(BinaryData::app_png, BinaryData::app_pngSize);
 
-    title.setText("Fizzle", juce::dontSendNotification);
-    juce::Font titleFont(juce::FontOptions(26.0f, juce::Font::bold));
-    titleFont.setExtraKerningFactor(0.018f);
+    title.setText("fizzle", juce::dontSendNotification);
+    juce::Font titleFont(juce::FontOptions(25.0f, juce::Font::plain));
+    titleFont.setTypefaceStyle("SemiBold");
+    titleFont.setExtraKerningFactor(0.042f);
     title.setFont(titleFont);
     addAndMakeVisible(title);
     title.setVisible(true);
@@ -976,7 +1061,10 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     enabledProgramsListBox.setOutlineThickness(1);
     enabledProgramsListBox.setColour(juce::ListBox::outlineColourId, kUiAccent.withAlpha(0.25f));
 
-    settingsPanel = std::make_unique<SettingsOverlay>();
+    settingsPanel = std::make_unique<SettingsOverlay>([this]
+    {
+        setSettingsPanelVisible(false);
+    });
     settingsPanel->addAndMakeVisible(settingsNavLabel);
     settingsPanel->addAndMakeVisible(settingsNavAutoEnableButton);
     settingsPanel->addAndMakeVisible(settingsNavUpdatesButton);
@@ -1035,10 +1123,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     addAndMakeVisible(meterOut);
     addAndMakeVisible(diagnostics);
 
-    bufferBox.addItem("128", 1);
-    bufferBox.addItem("256", 2);
-    bufferBox.addItem("512", 3);
-    bufferBox.setSelectedId(2, juce::dontSendNotification);
+    populateBufferBox(bufferBox, kDefaultBlockSize);
 
     vstAvailableBox.setTextWhenNothingSelected("Detected VST3 plugins");
     const auto fxEnabled = ! params.bypass.load();
@@ -1126,32 +1211,34 @@ void MainComponent::onWindowVisible()
     }
 }
 
+bool MainComponent::areEffectsEnabled() const
+{
+    return ! params.bypass.load();
+}
+
+bool MainComponent::isMuted() const
+{
+    return params.mute.load();
+}
+
 void MainComponent::trayToggleEffectsBypass()
 {
     const auto enableEffects = params.bypass.load();
     applyEffectsEnabledState(enableEffects, true);
+    setEffectsHint(enableEffects ? "Effects enabled from tray" : "Effects bypassed from tray", 50);
 }
 
 void MainComponent::trayToggleMute()
 {
     const auto next = ! params.mute.load();
     params.mute.store(next);
-    setEffectsHint(next ? "Muted from tray" : "Unmuted from tray", 40);
+    setEffectsHint(next ? "Muted from tray" : "Unmuted from tray", next ? -1 : 45);
+    repaint(effectsToggle.getBounds().expanded(180, 20));
 }
 
 void MainComponent::trayRestartAudio()
 {
-    juce::String error;
-    engine.restartAudio(error);
-    if (error.isNotEmpty())
-    {
-        Logger::instance().log("Restart error: " + error);
-        setEffectsHint("Audio restart failed", 60);
-        return;
-    }
-
-    loadDeviceLists();
-    setEffectsHint("Audio restarted", 35);
+    runAudioRestartWithOverlay(true);
 }
 
 void MainComponent::trayLoadPreset(const juce::String& name)
@@ -1724,6 +1811,7 @@ void MainComponent::loadDeviceLists()
     cachedSettings.inputDeviceName = current.inputDeviceName;
     cachedSettings.outputDeviceName = current.outputDeviceName;
     cachedSettings.bufferSize = current.bufferSize;
+    syncBufferBoxSelection(bufferBox, current.bufferSize);
     if (current.inputDeviceName.isNotEmpty())
         inputBox.setSelectedId(inputNames.indexOf(current.inputDeviceName) + 1, juce::dontSendNotification);
     if (current.outputDeviceName.isNotEmpty())
@@ -1765,7 +1853,7 @@ void MainComponent::applySettingsFromControls()
     s.inputDeviceName = inputBox.getText();
     s.outputDeviceName = getSelectedOutputDeviceName();
     const auto requestedBuffer = bufferBox.getText().getIntValue();
-    s.bufferSize = requestedBuffer > 0 ? requestedBuffer : 256;
+    s.bufferSize = requestedBuffer > 0 ? requestedBuffer : kDefaultBlockSize;
 
     if (s.inputDeviceName.isEmpty() || s.outputDeviceName.isEmpty())
         return;
@@ -1940,7 +2028,7 @@ bool MainComponent::computeAutoEnableShouldEnable(bool& hasCondition) const
 void MainComponent::setEffectsHint(const juce::String& text, int ticks)
 {
     effectsHintLabel.setText(text, juce::dontSendNotification);
-    effectsHintTicks = juce::jmax(0, ticks);
+    effectsHintTicks = ticks < 0 ? -1 : juce::jmax(0, ticks);
 }
 
 void MainComponent::applyEffectsEnabledState(bool enabled, bool fromUserToggle)
@@ -1980,6 +2068,44 @@ void MainComponent::applyEffectsEnabledState(bool enabled, bool fromUserToggle)
             setEffectsHint({}, 0);
         }
     }
+}
+
+void MainComponent::runAudioRestartWithOverlay(bool fromTray)
+{
+    if (restartOverlayBusy)
+        return;
+
+    restartOverlayActive = true;
+    restartOverlayBusy = true;
+    restartOverlayAlpha = juce::jmax(restartOverlayAlpha, 0.25f);
+    restartOverlayTargetAlpha = 1.0f;
+    restartOverlayTicks = 0;
+    restartOverlayText = "Restarting audio...";
+    repaint();
+
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    juce::Timer::callAfterDelay(20, [safeThis, fromTray]
+    {
+        if (safeThis == nullptr)
+            return;
+
+        juce::String error;
+        safeThis->engine.restartAudio(error);
+        safeThis->loadDeviceLists();
+        safeThis->restartOverlayBusy = false;
+        safeThis->restartOverlayTicks = 18;
+
+        if (error.isNotEmpty())
+        {
+            Logger::instance().log("Restart error: " + error);
+            safeThis->restartOverlayText = "Audio restart failed";
+            safeThis->setEffectsHint("Audio restart failed", 90);
+            return;
+        }
+
+        safeThis->restartOverlayText = "Audio restarted";
+        safeThis->setEffectsHint(fromTray ? "Audio restarted from tray" : "Audio restarted", 55);
+    });
 }
 
 void MainComponent::setUpdateStatus(const juce::String& text, bool warning)
@@ -2272,16 +2398,10 @@ void MainComponent::finishRowDrag(int row)
         return;
     }
 
-    juce::Component::SafePointer<MainComponent> safeThis(this);
-    juce::MessageManager::callAsync([safeThis, from, to]
-    {
-        if (safeThis == nullptr)
-            return;
-        safeThis->closePluginEditorWindow();
-        safeThis->engine.getVstHost().movePlugin(from, to);
-        safeThis->refreshPluginChainUi();
-        safeThis->vstChainList.selectRow(to);
-    });
+    closePluginEditorWindow();
+    engine.getVstHost().swapPlugin(from, to);
+    refreshPluginChainUi();
+    vstChainList.selectRow(to);
 }
 
 void MainComponent::setRowMix(int row, float mix)
@@ -2311,9 +2431,7 @@ void MainComponent::loadPresetByName(const juce::String& name)
             else
                 outputBox.setText(getDisplayOutputName(engineSettings.outputDeviceName), juce::dontSendNotification);
         }
-        if (engineSettings.bufferSize == 128) bufferBox.setSelectedId(1, juce::dontSendNotification);
-        else if (engineSettings.bufferSize == 512) bufferBox.setSelectedId(3, juce::dontSendNotification);
-        else bufferBox.setSelectedId(2, juce::dontSendNotification);
+        syncBufferBoxSelection(bufferBox, engineSettings.bufferSize);
 
         juce::String startError;
         engine.stop();
@@ -2335,7 +2453,7 @@ void MainComponent::loadPresetByName(const juce::String& name)
         juce::String error;
         const auto d = engine.getDiagnostics();
         const auto sampleRate = d.sampleRate > 0.0 ? d.sampleRate : 48000.0;
-        const auto blockSize = d.bufferSize > 0 ? d.bufferSize : 256;
+        const auto blockSize = d.bufferSize > 0 ? d.bufferSize : kDefaultBlockSize;
         for (const auto& p : preset->plugins)
         {
             juce::PluginDescription description;
@@ -2391,10 +2509,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
     else if (button == &restartButton)
     {
-        juce::String error;
-        engine.restartAudio(error);
-        if (error.isNotEmpty())
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Restart failed", error);
+        runAudioRestartWithOverlay(false);
     }
     else if (button == &aboutButton)
     {
@@ -2419,7 +2534,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     {
         if (! engine.isListenEnabled())
         {
-            const auto monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "realtek", "output" });
+            const auto monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
             if (monitor.isEmpty())
                 return;
             if (monitor == getSelectedOutputDeviceName())
@@ -2678,7 +2793,7 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
             juce::String error;
             const auto d = engine.getDiagnostics();
             const auto sampleRate = d.sampleRate > 0.0 ? d.sampleRate : 48000.0;
-            const auto blockSize = d.bufferSize > 0 ? d.bufferSize : 256;
+            const auto blockSize = d.bufferSize > 0 ? d.bufferSize : kDefaultBlockSize;
             engine.getVstHost().addPlugin(known.getReference(selected), sampleRate, blockSize, error);
             if (error.isNotEmpty())
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Plugin Load Failed", error);
@@ -2850,6 +2965,15 @@ void MainComponent::timerCallback()
     const bool listenStateChanged = (listenEnabled != lastListenEnabledState);
     lastListenEnabledState = listenEnabled;
 
+    const auto muted = params.mute.load();
+    const bool muteStateChanged = (muted != lastMutedState);
+    lastMutedState = muted;
+    effectsHintLabel.setColour(juce::Label::textColourId, muted ? kUiSalmon.withAlpha(0.95f) : kUiAccentSoft);
+    if (muted && ! effectsHintLabel.getText().containsIgnoreCase("Muted"))
+        setEffectsHint("Muted from tray", -1);
+    else if (! muted && effectsHintTicks < 0)
+        setEffectsHint({}, 0);
+
     if (effectsHintTicks > 0)
     {
         --effectsHintTicks;
@@ -2874,6 +2998,37 @@ void MainComponent::timerCallback()
             settingsPanel->setVisible(true);
     }
 
+    bool overlayAlphaChanged = false;
+    if (restartOverlayBusy)
+    {
+        restartOverlayTargetAlpha = 1.0f;
+    }
+    else if (restartOverlayTicks > 0)
+    {
+        --restartOverlayTicks;
+    }
+    else
+    {
+        restartOverlayTargetAlpha = 0.0f;
+    }
+
+    const auto overlayBefore = restartOverlayAlpha;
+    restartOverlayAlpha += (restartOverlayTargetAlpha - restartOverlayAlpha) * 0.24f;
+    if (std::abs(restartOverlayAlpha - restartOverlayTargetAlpha) < 0.01f)
+        restartOverlayAlpha = restartOverlayTargetAlpha;
+    overlayAlphaChanged = std::abs(restartOverlayAlpha - overlayBefore) > 0.001f;
+
+    if (! restartOverlayBusy && restartOverlayTicks == 0 && restartOverlayAlpha <= 0.01f)
+    {
+        restartOverlayAlpha = 0.0f;
+        restartOverlayActive = false;
+        restartOverlayText.clear();
+    }
+    else if (restartOverlayAlpha > 0.01f || restartOverlayBusy)
+    {
+        restartOverlayActive = true;
+    }
+
     savePresetFlashAlpha *= 0.84f;
     aboutFlashAlpha *= 0.84f;
     if (savePresetFlashAlpha < 0.01f)
@@ -2893,6 +3048,10 @@ void MainComponent::timerCallback()
         dirty = dirty.getUnion(aboutButton.getBounds().expanded(6, 4));
     if (listenStateChanged)
         dirty = dirty.getUnion(routeSpeakersButton.getBounds().expanded(10, 6));
+    if (muteStateChanged)
+        dirty = dirty.getUnion(effectsToggle.getBounds().expanded(140, 18));
+    if (overlayAlphaChanged || restartOverlayActive)
+        dirty = dirty.getUnion(getLocalBounds());
 
     if (settingsAlphaChanged && settingsPanel != nullptr && settingsPanel->isVisible())
         settingsPanel->repaint();
@@ -2936,8 +3095,8 @@ juce::Component* MainComponent::refreshComponentForRow(int rowNumber, bool isRow
 
 void MainComponent::paint(juce::Graphics& g)
 {
-    auto shell = getLocalBounds().toFloat().reduced(4.0f, 0.0f);
-    constexpr float shellRadius = 24.0f;
+    auto shell = getLocalBounds().toFloat().reduced(6.0f, 2.0f);
+    constexpr float shellRadius = 25.0f;
     auto makePanelPath = [](juce::Rectangle<float> r, float radius)
     {
         juce::Path p;
@@ -2950,32 +3109,49 @@ void MainComponent::paint(juce::Graphics& g)
     auto shellPath = makePanelPath(shell, shellRadius);
     g.reduceClipRegion(shellPath);
 
-    juce::ColourGradient bg(kUiBg.brighter(0.08f), shell.getX(), shell.getY(),
-                            kUiBg.darker(0.22f), shell.getX(), shell.getBottom(), false);
+    if (draggingWindow)
+    {
+        g.setColour(kUiPanel.withAlpha(0.97f));
+        g.fillPath(shellPath);
+        g.setColour(kUiAccent.withAlpha(0.22f));
+        g.strokePath(makePanelPath(shell.reduced(1.0f, 0.8f), shellRadius - 0.8f), juce::PathStrokeType(1.5f));
+        return;
+    }
+
+    juce::ColourGradient bg(kUiBg.brighter(0.05f), shell.getX(), shell.getY(),
+                            kUiBg.darker(0.14f), shell.getX(), shell.getBottom(), false);
     g.setGradientFill(bg);
     g.fillRect(getLocalBounds());
-    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.028f);
+    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.022f);
     g.fillRect(shell.toNearestInt());
 
-    auto outer = shell.expanded(1.5f, 1.0f);
-    g.setColour(kUiAccent.withAlpha(0.045f));
-    g.strokePath(makePanelPath(outer, shellRadius + 1.5f), juce::PathStrokeType(1.2f));
+    auto outer = shell.expanded(2.0f, 1.6f);
+    g.setColour(kUiAccent.withAlpha(0.08f));
+    g.strokePath(makePanelPath(outer, shellRadius + 2.0f), juce::PathStrokeType(1.7f));
+    g.setColour(kUiSalmon.withAlpha(0.06f));
+    g.strokePath(makePanelPath(shell.expanded(0.9f, 0.8f), shellRadius + 0.8f), juce::PathStrokeType(1.0f));
 
-    auto card = shell.reduced(2.4f, 0.7f);
-    juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(0.9f), card.getX(), card.getY(),
-                                  kUiPanel.withAlpha(0.95f), card.getX(), card.getBottom(), false);
+    auto card = shell.reduced(2.0f, 1.0f);
+    juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(0.90f), card.getX(), card.getY(),
+                                  kUiPanel.withAlpha(0.96f), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
     g.fillPath(makePanelPath(card, 21.0f));
-    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.018f);
+    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.014f);
     g.fillPath(makePanelPath(card, 21.0f));
 
-    auto header = headerBounds.toFloat().expanded(1.5f, 0.5f);
-    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(0.5f), header.getX(), header.getY(),
-                                    kUiPanel.withAlpha(0.25f), header.getX(), header.getBottom(), false);
+    auto header = headerBounds.toFloat().expanded(2.0f, 1.0f);
+    auto headerBand = header;
+    headerBand.setBottom(headerBand.getBottom() + 9.0f);
+    juce::Path headerPath;
+    headerPath.addRoundedRectangle(headerBand.getX(), headerBand.getY(), headerBand.getWidth(), headerBand.getHeight(),
+                                   14.0f, 14.0f,
+                                   true, true, false, false);
+    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(0.62f), headerBand.getX(), headerBand.getY(),
+                                    kUiPanel.withAlpha(0.14f), headerBand.getX(), headerBand.getBottom(), false);
     g.setGradientFill(headerFill);
-    g.fillRoundedRectangle(header, 11.0f);
-    g.setColour(kUiAccent.withAlpha(0.08f));
-    g.drawRoundedRectangle(header.reduced(0.8f), 10.2f, 0.9f);
+    g.fillPath(headerPath);
+    g.setColour(kUiAccent.withAlpha(0.16f));
+    g.strokePath(headerPath, juce::PathStrokeType(1.0f));
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
     g.setColour(juce::Colours::white.withAlpha(0.02f));
@@ -2988,13 +3164,17 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);
 
-    g.setColour(kUiAccent.withAlpha(0.064f));
-    g.strokePath(makePanelPath(shell.reduced(0.9f, 0.0f), shellRadius - 0.8f), juce::PathStrokeType(0.95f));
-    g.setColour(kUiAccentSoft.withAlpha(0.022f));
-    g.strokePath(makePanelPath(shell.expanded(1.4f, 0.4f), shellRadius + 1.2f), juce::PathStrokeType(0.9f));
+    g.setColour(kUiAccent.withAlpha(0.055f));
+    g.strokePath(makePanelPath(shell.reduced(0.8f, 0.2f), shellRadius - 0.8f), juce::PathStrokeType(1.0f));
+    g.setColour(kUiAccentSoft.withAlpha(0.026f));
+    g.strokePath(makePanelPath(shell.expanded(1.2f, 0.4f), shellRadius + 1.1f), juce::PathStrokeType(0.9f));
 
     if (appLogo.isValid() && ! headerLogoBounds.isEmpty())
     {
+        g.setColour(kUiAccent.withAlpha(0.24f));
+        g.fillEllipse(headerLogoBounds.toFloat().expanded(2.4f));
+        g.setColour(kUiAccentSoft.withAlpha(0.30f));
+        g.drawEllipse(headerLogoBounds.toFloat().expanded(2.4f), 1.0f);
         g.drawImageWithin(appLogo,
                           headerLogoBounds.getX(),
                           headerLogoBounds.getY(),
@@ -3036,20 +3216,20 @@ void MainComponent::paint(juce::Graphics& g)
 void MainComponent::paintOverChildren(juce::Graphics& g)
 {
     const auto header = headerBounds.toFloat();
-    const auto dividerY = header.getBottom() + 1.6f;
+    const auto dividerY = header.getBottom() + 4.0f;
     const auto dividerX = header.getX() + 14.0f;
     const auto dividerW = header.getWidth() - 28.0f;
-    g.setColour(kUiAccent.withAlpha(0.028f));
-    g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.0f);
+    g.setColour(kUiAccent.withAlpha(0.045f));
+    g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.2f);
 
-    const auto loopWidth = dividerW + 180.0f;
-    const auto phase = std::fmod(uiPulse * 96.0f, loopWidth);
+    const auto loopWidth = dividerW + 220.0f;
+    const auto phase = std::fmod(uiPulse * 72.0f, loopWidth);
     const auto x0 = dividerX - 60.0f + phase;
     juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
-                               kUiAccentSoft.withAlpha(0.25f), x0 + 72.0f, dividerY, false);
+                               kUiAccentSoft.withAlpha(0.28f), x0 + 86.0f, dividerY, false);
     sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
     g.setGradientFill(sweep);
-    g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.0f, dividerW, 2.0f));
+    g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.2f, dividerW, 2.4f));
 
     if (engine.isListenEnabled())
     {
@@ -3059,6 +3239,20 @@ void MainComponent::paintOverChildren(juce::Graphics& g)
         g.fillEllipse(led);
         g.setColour(kUiMint.withAlpha(0.35f));
         g.drawEllipse(led.expanded(2.0f), 1.3f);
+    }
+
+    if (params.mute.load())
+    {
+        auto badge = effectsToggle.getBounds().toFloat().withWidth(118.0f).translated(0.0f, -22.0f);
+        g.setColour(kUiSalmon.withAlpha(0.24f));
+        g.fillRoundedRectangle(badge, 9.0f);
+        g.setColour(kUiSalmon.withAlpha(0.7f));
+        g.drawRoundedRectangle(badge.reduced(0.5f), 8.4f, 1.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.95f));
+        juce::Font muteFont(juce::FontOptions(11.5f, juce::Font::bold));
+        muteFont.setExtraKerningFactor(0.06f);
+        g.setFont(muteFont);
+        g.drawFittedText("MUTED", badge.toNearestInt(), juce::Justification::centred, 1);
     }
 
     auto drawFlash = [&g](const juce::Button& button, float alpha)
@@ -3073,27 +3267,62 @@ void MainComponent::paintOverChildren(juce::Graphics& g)
     };
     drawFlash(savePresetButton, savePresetFlashAlpha);
     drawFlash(aboutButton, aboutFlashAlpha);
+
+    if (restartOverlayAlpha > 0.01f || restartOverlayBusy)
+    {
+        auto shell = getLocalBounds().toFloat().reduced(6.0f, 2.0f);
+        juce::Path shellPath;
+        shellPath.addRoundedRectangle(shell, 24.0f);
+        g.saveState();
+        g.reduceClipRegion(shellPath);
+        g.setColour(juce::Colours::black.withAlpha(0.32f * restartOverlayAlpha));
+        g.fillPath(shellPath);
+
+        auto panel = shell.reduced(shell.getWidth() * 0.34f, shell.getHeight() * 0.40f);
+        panel = panel.withHeight(86.0f);
+        panel.setY(shell.getCentreY() - panel.getHeight() * 0.5f);
+        g.setColour(kUiPanel.withAlpha(0.96f * restartOverlayAlpha));
+        g.fillRoundedRectangle(panel, 14.0f);
+        g.setColour(kUiAccent.withAlpha(0.46f * restartOverlayAlpha));
+        g.drawRoundedRectangle(panel.reduced(0.5f), 13.4f, 1.1f);
+
+        const auto spinnerCenter = juce::Point<float>(panel.getX() + 24.0f, panel.getCentreY());
+        const auto startAngle = uiPulse * 2.8f;
+        juce::Path arc;
+        arc.addCentredArc(spinnerCenter.x, spinnerCenter.y, 8.8f, 8.8f, 0.0f, startAngle, startAngle + 4.2f, true);
+        g.setColour(kUiAccentSoft.withAlpha(0.95f * restartOverlayAlpha));
+        g.strokePath(arc, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        auto textArea = panel.toNearestInt().reduced(42, 0);
+        g.setColour(kUiText.withAlpha(0.96f * restartOverlayAlpha));
+        juce::Font overlayFont(juce::FontOptions(13.5f, juce::Font::bold));
+        overlayFont.setExtraKerningFactor(0.022f);
+        g.setFont(overlayFont);
+        const auto text = restartOverlayText.isNotEmpty() ? restartOverlayText : "Restarting audio...";
+        g.drawFittedText(text, textArea, juce::Justification::centredLeft, 1);
+        g.restoreState();
+    }
 }
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(14, 8);
-    const int gap = 8;
+    auto area = getLocalBounds().reduced(18, 12);
+    const int gap = 10;
 
-    headerBounds = area.removeFromTop(34);
-    auto headerInner = headerBounds.reduced(8, 4);
-    auto windowButtons = headerInner.removeFromRight(86);
-    windowCloseButton.setBounds(windowButtons.removeFromRight(24));
-    windowButtons.removeFromRight(5);
-    windowMaxButton.setBounds(windowButtons.removeFromRight(24));
-    windowButtons.removeFromRight(5);
-    windowMinButton.setBounds(windowButtons.removeFromRight(24));
+    headerBounds = area.removeFromTop(38);
+    auto headerInner = headerBounds.reduced(8, 5);
+    auto windowButtons = headerInner.removeFromRight(94);
+    windowCloseButton.setBounds(windowButtons.removeFromRight(26));
+    windowButtons.removeFromRight(6);
+    windowMaxButton.setBounds(windowButtons.removeFromRight(26));
+    windowButtons.removeFromRight(6);
+    windowMinButton.setBounds(windowButtons.removeFromRight(26));
 
-    headerLogoBounds = headerInner.removeFromLeft(22).withSizeKeepingCentre(18, 18);
-    headerInner.removeFromLeft(6);
-    title.setBounds(headerInner.removeFromLeft(220));
+    headerLogoBounds = headerInner.removeFromLeft(24).withSizeKeepingCentre(20, 20);
+    headerInner.removeFromLeft(7);
+    title.setBounds(headerInner.removeFromLeft(250));
 
-    area.removeFromTop(6);
+    area.removeFromTop(10);
 
     const int topWidth = area.getWidth();
     const int inputW = juce::jmax(180, static_cast<int>(topWidth * 0.24f));
@@ -3104,12 +3333,12 @@ void MainComponent::resized()
 
     auto labels = area.removeFromTop(20);
     auto inputLabelArea = labels.removeFromLeft(inputW);
-    inputLabel.setBounds(inputLabelArea.withTrimmedLeft(34));
-    inputIconBounds = juce::Rectangle<int>(inputLabelArea.getX() + 8, inputLabelArea.getY() + 2, 16, 16);
+    inputLabel.setBounds(inputLabelArea.withTrimmedLeft(40));
+    inputIconBounds = juce::Rectangle<int>(inputLabelArea.getX() + 8, inputLabelArea.getY() + 1, 18, 18);
     labels.removeFromLeft(gap);
     auto outputLabelArea = labels.removeFromLeft(outputW);
-    outputLabel.setBounds(outputLabelArea.withTrimmedLeft(34));
-    outputIconBounds = juce::Rectangle<int>(outputLabelArea.getX() + 8, outputLabelArea.getY() + 2, 16, 16);
+    outputLabel.setBounds(outputLabelArea.withTrimmedLeft(40));
+    outputIconBounds = juce::Rectangle<int>(outputLabelArea.getX() + 8, outputLabelArea.getY() + 1, 18, 18);
     labels.removeFromLeft(gap);
     bufferLabel.setBounds(labels.removeFromLeft(bufferW)); labels.removeFromLeft(gap);
     sampleRateLabel.setBounds(labels.removeFromLeft(sampleW)); labels.removeFromLeft(gap);

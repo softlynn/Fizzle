@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.7 - Latency Tuning + Bluetooth Listen Improvements
+
+### Added
+- Expanded audio buffer choices for processing tuning (`64`, `96`, `128`, `192`, `256`, `384`, `512`, `1024`).
+- Buffer selection now preserves and displays non-legacy values loaded from active settings/presets.
+
+### Changed
+- Unified internal buffer-size fallbacks to use the default engine constant instead of duplicated literals.
+- Improved listen-device matching heuristics for Bluetooth earbuds/headsets (`bluetooth`, `buds`, `earbud`, `headset` keywords).
+
+### Fixed
+- Listen monitor setup now attempts to align with active processing sample rate and buffer size before falling back to device defaults.
+- Monitor queue now trims stale buffered audio when backlog grows, reducing added monitoring lag/drift under load.
+
 ## v0.1.6 - Tray Control + Visual Stability Pass
 
 ### Fixed

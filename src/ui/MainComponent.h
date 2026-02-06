@@ -35,6 +35,8 @@ public:
     void trayToggleMute();
     void trayRestartAudio();
     void trayLoadPreset(const juce::String& name);
+    bool areEffectsEnabled() const;
+    bool isMuted() const;
 
 private:
     class ProgramListModel;
@@ -167,6 +169,13 @@ private:
     juce::String lastVirtualMicStatus;
     double lastDisplayedSampleRateHz { 0.0 };
     bool lastListenEnabledState { false };
+    bool lastMutedState { false };
+    bool restartOverlayActive { false };
+    bool restartOverlayBusy { false };
+    float restartOverlayAlpha { 0.0f };
+    float restartOverlayTargetAlpha { 0.0f };
+    int restartOverlayTicks { 0 };
+    juce::String restartOverlayText;
 
     void buttonClicked(juce::Button* button) override;
     void comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged) override;
@@ -220,5 +229,6 @@ private:
     void applyWindowsStartupSetting();
     void toggleWindowMaximize();
     void applyEffectsEnabledState(bool enabled, bool fromUserToggle);
+    void runAudioRestartWithOverlay(bool fromTray);
 };
 }

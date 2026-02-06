@@ -52,19 +52,40 @@ public:
         return 0;
     }
 
+    int getMenuWindowFlags() override
+    {
+        return juce::ComponentPeer::windowHasDropShadow;
+    }
+
     void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override
     {
-        g.fillAll(kTrayBg);
+        drawBackground(g, width, height);
+    }
+
+    void drawPopupMenuBackgroundWithOptions(juce::Graphics& g,
+                                            int width,
+                                            int height,
+                                            const juce::PopupMenu::Options&) override
+    {
+        drawBackground(g, width, height);
+    }
+
+    void drawBackground(juce::Graphics& g, int width, int height) const
+    {
+        g.fillAll(juce::Colours::transparentBlack);
         auto r = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
+        juce::Path shell;
+        shell.addRoundedRectangle(r.reduced(0.6f), 10.0f);
+        g.reduceClipRegion(shell);
+
         juce::ColourGradient fill(kTrayPanel, r.getX(), r.getY(),
                                   kTrayBg, r.getX(), r.getBottom(), false);
         g.setGradientFill(fill);
         g.fillRect(r);
         g.setTiledImageFill(getMenuNoiseTile(), 0, 0, 0.05f);
         g.fillRect(r);
-
-        g.setColour(kTrayAccent.withAlpha(0.06f));
-        g.drawRect(r.toNearestInt(), 1);
+        g.setColour(kTrayAccent.withAlpha(0.15f));
+        g.drawRoundedRectangle(r.reduced(1.0f), 9.0f, 1.0f);
     }
 
     void drawPopupMenuItem(juce::Graphics& g,
@@ -170,8 +191,10 @@ void TrayController::showContextMenu()
     m.addItem("Fizzle v" + juce::String(FIZZLE_VERSION), false, false, nullptr);
     m.addSeparator();
     m.addItem("Open", [this] { listener.trayOpenRequested(); });
-    m.addItem("Enable/Bypass", [this] { listener.trayToggleBypass(); });
-    m.addItem("Mute", [this] { listener.trayToggleMute(); });
+    const auto effectsOn = listener.trayEffectsEnabled();
+    const auto muted = listener.trayMuted();
+    m.addItem(effectsOn ? "Effects: On" : "Effects: Off", true, effectsOn, [this] { listener.trayToggleBypass(); });
+    m.addItem("Mute", true, muted, [this] { listener.trayToggleMute(); });
 
     juce::PopupMenu presetMenu;
     for (const auto& preset : listener.trayPresets())

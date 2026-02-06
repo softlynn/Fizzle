@@ -110,7 +110,20 @@ void AudioEngine::setListenEnabled(bool enabled)
     setup.outputChannels.clear();
     setup.outputChannels.setBit(0, true);
     setup.outputChannels.setBit(1, true);
+    const auto preferredRate = currentDeviceSampleRate.load();
+    if (preferredRate > 0.0)
+        setup.sampleRate = preferredRate;
+    if (settings.bufferSize > 0)
+        setup.bufferSize = settings.bufferSize;
+
     error = monitorDeviceManager.setAudioDeviceSetup(setup, true);
+    if (error.isNotEmpty())
+    {
+        Logger::instance().log("Monitor preferred setup failed, retrying with defaults: " + error);
+        setup.sampleRate = 0.0;
+        setup.bufferSize = 0;
+        error = monitorDeviceManager.setAudioDeviceSetup(setup, true);
+    }
     if (error.isNotEmpty())
     {
         Logger::instance().log("Monitor setup failed: " + error);
@@ -300,6 +313,15 @@ void AudioEngine::MonitorCallback::audioDeviceIOCallbackWithContext(const float*
     for (int c = 0; c < numOutputChannels; ++c)
         if (outputChannelData[c] != nullptr)
             juce::FloatVectorOperations::clear(outputChannelData[c], numSamples);
+
+    const auto queued = owner.monitorFifo.getNumReady();
+    const auto maxQueued = numSamples * 2;
+    if (queued > maxQueued)
+    {
+        int dropStart1, dropSize1, dropStart2, dropSize2;
+        owner.monitorFifo.prepareToRead(queued - maxQueued, dropStart1, dropSize1, dropStart2, dropSize2);
+        owner.monitorFifo.finishedRead(dropSize1 + dropSize2);
+    }
 
     int start1, size1, start2, size2;
     owner.monitorFifo.prepareToRead(numSamples, start1, size1, start2, size2);

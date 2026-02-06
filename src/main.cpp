@@ -191,6 +191,22 @@ private:
     {
         return presets != nullptr ? presets->listPresets() : juce::StringArray {};
     }
+
+    bool trayEffectsEnabled() const override
+    {
+        if (window != nullptr)
+            if (auto* main = window->getMainComponent())
+                return main->areEffectsEnabled();
+        return ! effectParams.bypass.load();
+    }
+
+    bool trayMuted() const override
+    {
+        if (window != nullptr)
+            if (auto* main = window->getMainComponent())
+                return main->isMuted();
+        return effectParams.mute.load();
+    }
 };
 }
 

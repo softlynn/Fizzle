@@ -17,6 +17,8 @@ public:
         virtual void trayExit() = 0;
         virtual void trayPresetSelected(const juce::String& name) = 0;
         virtual juce::StringArray trayPresets() const = 0;
+        virtual bool trayEffectsEnabled() const = 0;
+        virtual bool trayMuted() const = 0;
     };
 
     explicit TrayController(Listener& l);

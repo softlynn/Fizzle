@@ -181,6 +181,17 @@ void VstHost::movePlugin(int from, int to)
         chain.move(from, to);
 }
 
+void VstHost::swapPlugin(int first, int second)
+{
+    const juce::ScopedLock sl(chainLock);
+    if (! juce::isPositiveAndBelow(first, chain.size())
+        || ! juce::isPositiveAndBelow(second, chain.size())
+        || first == second)
+        return;
+
+    chain.swap(first, second);
+}
+
 void VstHost::setEnabled(int index, bool enabled)
 {
     const juce::ScopedLock sl(chainLock);

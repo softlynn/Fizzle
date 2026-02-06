@@ -30,6 +30,7 @@ public:
     bool findDescriptionByIdentifier(const juce::String& identifier, juce::PluginDescription& out) const;
     void removePlugin(int index);
     void movePlugin(int from, int to);
+    void swapPlugin(int first, int second);
     void setEnabled(int index, bool enabled);
     void clear();
 
