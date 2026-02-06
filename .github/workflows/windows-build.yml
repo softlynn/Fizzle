@@ -1,0 +1,27 @@
+name: windows-build
+
+on:
+  push:
+    branches: ["main", "codex/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build App
+        run: cmake --build build --config Release --target Fizzle
+
+      - name: Build Tests
+        run: cmake --build build --config Release --target FizzleTests
+
+      - name: Run Tests
+        run: ctest --test-dir build -C Release --output-on-failure
