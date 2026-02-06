@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.3 - Header and Transparency Pass
+
+### Changed
+- Stronger header/body integration so the window reads as one continuous surface.
+- Removed the hard title/content seam and softened top blend/divider treatment.
+- Reduced main shell border opacity for a cleaner transparent edge feel.
+- Refined tray menu border transparency and corner blending.
+
 ## v0.1.2 - Auto-Install and Startup Controls
 
 ### Added

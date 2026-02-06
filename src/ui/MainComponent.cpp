@@ -647,10 +647,11 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     appLogo = juce::ImageFileFormat::loadFrom(BinaryData::app_png, BinaryData::app_pngSize);
 
     title.setText("Fizzle", juce::dontSendNotification);
-    juce::Font titleFont(juce::FontOptions(30.0f, juce::Font::bold));
+    juce::Font titleFont(juce::FontOptions(26.0f, juce::Font::bold));
     titleFont.setExtraKerningFactor(0.018f);
     title.setFont(titleFont);
     addAndMakeVisible(title);
+    title.setVisible(false);
 
     inputLabel.setText("Input Mic", juce::dontSendNotification);
     outputLabel.setText("Fizzle Mic Output", juce::dontSendNotification);
@@ -2696,14 +2697,29 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillRect(getLocalBounds());
 
     auto outer = shell.expanded(2.0f);
-    g.setColour(kUiAccent.withAlpha(0.08f + pulse * 0.04f));
-    g.drawRoundedRectangle(outer, shellRadius + 2.0f, 2.0f);
+    g.setColour(kUiAccent.withAlpha(0.035f + pulse * 0.015f));
+    g.drawRoundedRectangle(outer, shellRadius + 2.0f, 1.4f);
 
-    auto card = shell.reduced(3.5f);
+    auto card = shell.reduced(3.0f);
     juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(0.9f), card.getX(), card.getY(),
                                   kUiPanel.withAlpha(0.95f), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
     g.fillRoundedRectangle(card, 21.0f);
+
+    auto topBlend = card.withHeight(60.0f);
+    juce::Path blendPath;
+    blendPath.addRoundedRectangle(topBlend.getX(), topBlend.getY(), topBlend.getWidth(), topBlend.getHeight() + 16.0f,
+                                  18.0f, 18.0f, true, true, false, false);
+    juce::ColourGradient blendFill(kUiPanelSoft.withAlpha(0.28f), topBlend.getX(), topBlend.getY(),
+                                   juce::Colours::transparentBlack, topBlend.getX(), topBlend.getBottom() + 16.0f, false);
+    g.setGradientFill(blendFill);
+    g.fillPath(blendPath);
+
+    auto seamShade = juce::Rectangle<float>(card.getX() + 10.0f, card.getY() + 1.0f, card.getWidth() - 20.0f, 22.0f);
+    juce::ColourGradient seam(juce::Colours::white.withAlpha(0.03f), seamShade.getX(), seamShade.getY(),
+                              juce::Colours::transparentBlack, seamShade.getX(), seamShade.getBottom(), false);
+    g.setGradientFill(seam);
+    g.fillRoundedRectangle(seamShade, 8.0f);
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
     g.setColour(juce::Colours::white.withAlpha(0.02f));
@@ -2716,21 +2732,21 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);
 
-    g.setColour(kUiAccent.withAlpha(0.19f + pulse * 0.06f));
-    g.drawRoundedRectangle(shell.reduced(0.9f), shellRadius - 0.8f, 1.5f);
-    g.setColour(kUiAccentSoft.withAlpha(0.06f + pulse * 0.03f));
-    g.drawRoundedRectangle(shell.expanded(1.8f), shellRadius + 1.5f, 1.6f);
+    g.setColour(kUiAccent.withAlpha(0.075f + pulse * 0.02f));
+    g.drawRoundedRectangle(shell.reduced(0.9f), shellRadius - 0.8f, 1.0f);
+    g.setColour(kUiAccentSoft.withAlpha(0.02f + pulse * 0.01f));
+    g.drawRoundedRectangle(shell.expanded(1.8f), shellRadius + 1.5f, 1.0f);
 
-    const auto dividerY = card.getY() + 52.0f;
+    const auto dividerY = card.getY() + 48.0f;
     const auto dividerX = card.getX() + 14.0f;
     const auto dividerW = card.getWidth() - 28.0f;
-    g.setColour(kUiAccent.withAlpha(0.08f));
+    g.setColour(kUiAccent.withAlpha(0.02f));
     g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.0f);
     const auto loopWidth = dividerW + 120.0f;
     const auto phase = std::fmod(uiPulse * 80.0f, loopWidth);
     const auto x0 = dividerX - 60.0f + phase;
     juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
-                               kUiAccentSoft.withAlpha(0.30f), x0 + 64.0f, dividerY, false);
+                               kUiAccentSoft.withAlpha(0.18f), x0 + 64.0f, dividerY, false);
     sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
     g.setGradientFill(sweep);
     g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.0f, dividerW, 2.0f));
@@ -2797,7 +2813,6 @@ void MainComponent::resized()
     auto area = getLocalBounds().reduced(14, 10);
     const int gap = 8;
 
-    title.setBounds(area.removeFromTop(32));
     area.removeFromTop(6);
 
     const int topWidth = area.getWidth();

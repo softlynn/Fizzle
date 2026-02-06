@@ -15,15 +15,24 @@ const juce::Colour kTrayHover(0x3058a8ff);
 class TrayMenuLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    int getPopupMenuBorderSizeWithOptions(const juce::PopupMenu::Options&) override
+    {
+        return 0;
+    }
+
     void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override
     {
+        g.fillAll(juce::Colours::transparentBlack);
         auto r = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
-        juce::ColourGradient fill(kTrayPanel, r.getX(), r.getY(),
-                                  kTrayBg, r.getX(), r.getBottom(), false);
+        juce::ColourGradient fill(kTrayPanel.withAlpha(0.97f), r.getX(), r.getY(),
+                                  kTrayBg.withAlpha(0.96f), r.getX(), r.getBottom(), false);
         g.setGradientFill(fill);
-        g.fillRoundedRectangle(r.reduced(1.0f), 10.0f);
-        g.setColour(kTrayAccent.withAlpha(0.24f));
-        g.drawRoundedRectangle(r.reduced(1.2f), 9.6f, 1.2f);
+        g.fillRoundedRectangle(r.reduced(0.8f), 10.0f);
+
+        g.setColour(kTrayAccent.withAlpha(0.08f));
+        g.drawRoundedRectangle(r.reduced(1.0f), 9.8f, 0.9f);
+        g.setColour(juce::Colours::white.withAlpha(0.03f));
+        g.drawRoundedRectangle(r.reduced(1.8f), 8.9f, 0.8f);
     }
 
     void drawPopupMenuItem(juce::Graphics& g,

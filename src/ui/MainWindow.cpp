@@ -90,15 +90,18 @@ public:
         auto r = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
 
         juce::Path chrome;
-        chrome.addRoundedRectangle(r.getX() + 1.0f, r.getY() + 1.0f, r.getWidth() - 2.0f, r.getHeight() + 12.0f,
+        chrome.addRoundedRectangle(r.getX() + 1.0f, r.getY() + 1.0f, r.getWidth() - 2.0f, r.getHeight() + 10.0f,
                                    18.0f, 18.0f, true, true, false, false);
         juce::ColourGradient fill(kWindowTop.withAlpha(0.97f), r.getX(), r.getY(),
                                   kWindowBottom.withAlpha(0.95f), r.getX(), r.getBottom(), false);
         g.setGradientFill(fill);
         g.fillPath(chrome);
 
-        g.setColour(kWindowBorder.withAlpha(0.10f));
-        g.drawLine(12.0f, r.getBottom() - 1.0f, r.getRight() - 12.0f, r.getBottom() - 1.0f, 1.1f);
+        juce::ColourGradient edgeFade(juce::Colours::transparentBlack, 12.0f, r.getBottom() - 0.5f,
+                                      kWindowBorder.withAlpha(0.04f), r.getCentreX(), r.getBottom() - 0.5f, false);
+        edgeFade.addColour(1.0, juce::Colours::transparentBlack);
+        g.setGradientFill(edgeFade);
+        g.fillRect(juce::Rectangle<float>(12.0f, r.getBottom() - 1.5f, r.getWidth() - 24.0f, 2.0f));
 
         auto iconBounds = juce::Rectangle<int>(titleSpaceX + 4, juce::jmax(2, (height - 20) / 2), 20, 20);
         if (logo.isValid())
@@ -110,7 +113,7 @@ public:
             g.fillEllipse(iconBounds.toFloat());
         }
 
-        juce::Font f(juce::FontOptions(17.0f, juce::Font::bold));
+        juce::Font f(juce::FontOptions(16.0f, juce::Font::bold));
         f.setExtraKerningFactor(0.015f);
         g.setFont(f);
         g.setColour(kWindowText);
