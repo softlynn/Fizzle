@@ -42,5 +42,6 @@ struct EngineSettings
     juce::String autoEnableProcessPath;
     juce::String lastPresetName;
     bool hasSeenFirstLaunchGuide { false };
+    bool autoDownloadUpdates { false };
 };
 }

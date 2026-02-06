@@ -30,6 +30,9 @@ EngineSettings fromVar(const juce::var& data)
         out.hasSeenFirstLaunchGuide = obj->hasProperty("hasSeenFirstLaunchGuide")
                                           ? static_cast<bool>(obj->getProperty("hasSeenFirstLaunchGuide"))
                                           : false;
+        out.autoDownloadUpdates = obj->hasProperty("autoDownloadUpdates")
+                                      ? static_cast<bool>(obj->getProperty("autoDownloadUpdates"))
+                                      : false;
         if (auto* arr = obj->getProperty("scannedVstPaths").getArray())
         {
             for (const auto& v : *arr)
@@ -58,6 +61,7 @@ juce::var toVar(const EngineSettings& settings)
     obj->setProperty("autoEnableProcessPath", settings.autoEnableProcessPath);
     obj->setProperty("lastPresetName", settings.lastPresetName);
     obj->setProperty("hasSeenFirstLaunchGuide", settings.hasSeenFirstLaunchGuide);
+    obj->setProperty("autoDownloadUpdates", settings.autoDownloadUpdates);
     juce::Array<juce::var> paths;
     for (const auto& p : settings.scannedVstPaths)
         paths.add(p);

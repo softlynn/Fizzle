@@ -4,6 +4,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <thread>
 #if JUCE_WINDOWS
 #include <windows.h>
 #include <tlhelp32.h>
@@ -22,6 +23,31 @@ const juce::Colour kUiTextMuted(0xffa8bbdd);
 const juce::Colour kUiAccent(0xff6dbbff);
 const juce::Colour kUiAccentSoft(0xffa4ddff);
 const juce::Colour kUiMint(0xff9af7d8);
+
+juce::String normalizeVersionTag(juce::String value)
+{
+    value = value.trim();
+    while (value.startsWithChar('v') || value.startsWithChar('V'))
+        value = value.substring(1);
+    return value;
+}
+
+int compareSemver(const juce::String& lhs, const juce::String& rhs)
+{
+    auto a = normalizeVersionTag(lhs);
+    auto b = normalizeVersionTag(rhs);
+    auto pa = juce::StringArray::fromTokens(a, ".", {});
+    auto pb = juce::StringArray::fromTokens(b, ".", {});
+    const auto n = juce::jmax(pa.size(), pb.size());
+    for (int i = 0; i < n; ++i)
+    {
+        const auto va = i < pa.size() ? pa[i].getIntValue() : 0;
+        const auto vb = i < pb.size() ? pb[i].getIntValue() : 0;
+        if (va != vb)
+            return va < vb ? -1 : 1;
+    }
+    return 0;
+}
 
 class ModernLookAndFeel final : public juce::LookAndFeel_V4
 {
@@ -599,10 +625,19 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     appSearchLabel.setText("Search Programs", juce::dontSendNotification);
     appListLabel.setText("Programs", juce::dontSendNotification);
     enabledProgramsLabel.setText("Enabled Programs", juce::dontSendNotification);
+    updatesLabel.setText("Updates", juce::dontSendNotification);
+    updateStatusLabel.setText("Auto-download is off.", juce::dontSendNotification);
+    updateStatusLabel.setColour(juce::Label::textColourId, kUiTextMuted);
+    updateStatusLabel.setJustificationType(juce::Justification::topLeft);
+    updateStatusLabel.setMinimumHorizontalScale(0.82f);
     settingsNavLabel.setText("Settings", juce::dontSendNotification);
     juce::Font navFont(juce::FontOptions(16.0f, juce::Font::bold));
     navFont.setExtraKerningFactor(0.02f);
     settingsNavLabel.setFont(navFont);
+    updatesLabel.setColour(juce::Label::textColourId, kUiText);
+    juce::Font sectionLabelFont(juce::FontOptions(14.0f, juce::Font::bold));
+    sectionLabelFont.setExtraKerningFactor(0.01f);
+    updatesLabel.setFont(sectionLabelFont);
     currentPresetLabel.setText("Current: Default", juce::dontSendNotification);
     virtualMicStatusLabel.setText("Virtual Mic: not routed", juce::dontSendNotification);
     effectsHintLabel.setText({}, juce::dontSendNotification);
@@ -625,6 +660,10 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     }
     effectsHintLabel.setFont(hintStatusFont);
     addAndMakeVisible(dragHintLabel);
+
+    juce::Font statusFont(juce::FontOptions(12.0f));
+    statusFont.setExtraKerningFactor(0.01f);
+    updateStatusLabel.setFont(statusFont);
 
     for (auto* c : { &inputBox, &outputBox, &bufferBox, &presetBox, &vstAvailableBox })
     {
@@ -669,9 +708,12 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     refreshAppsButton.setComponentID("refresh");
     removeProgramButton.setButtonText("Remove Selected");
     removeProgramButton.setComponentID("remove");
+    checkUpdatesButton.setButtonText("Check Now");
+    checkUpdatesButton.setComponentID("refresh");
     settingsNavAutoEnableButton.setEnabled(false);
     settingsNavAutoEnableButton.setToggleState(true, juce::dontSendNotification);
     autoEnableToggle.setButtonText("Auto Enable by Program");
+    autoDownloadUpdatesToggle.setButtonText("Auto-download new updates");
     appSearchEditor.setTextToShowWhenEmpty("Type to search programs...", juce::Colour(0xff9aa7b6));
     appSearchEditor.onTextChange = [this]
     {
@@ -692,6 +734,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     closeSettingsButton.addListener(this);
     autoEnableToggle.addListener(this);
     refreshAppsButton.addListener(this);
+    autoDownloadUpdatesToggle.addListener(this);
+    checkUpdatesButton.addListener(this);
 
     programListModel = std::make_unique<ProgramListModel>();
     programListModel->rowCount = [this]() { return static_cast<int>(filteredProgramIndices.size()); };
@@ -777,6 +821,10 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(appPathEditor);
     settingsPanel->addAndMakeVisible(browseAppPathButton);
     settingsPanel->addAndMakeVisible(removeProgramButton);
+    settingsPanel->addAndMakeVisible(updatesLabel);
+    settingsPanel->addAndMakeVisible(autoDownloadUpdatesToggle);
+    settingsPanel->addAndMakeVisible(checkUpdatesButton);
+    settingsPanel->addAndMakeVisible(updateStatusLabel);
     settingsPanel->addAndMakeVisible(closeSettingsButton);
 
     addAndMakeVisible(*settingsPanel);
@@ -823,6 +871,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
         cachedSettings.lastPresetName = persistedLastPreset;
     engine.getVstHost().importScannedPaths(cachedSettings.scannedVstPaths);
     autoEnableToggle.setToggleState(cachedSettings.autoEnableByApp, juce::dontSendNotification);
+    autoDownloadUpdatesToggle.setToggleState(cachedSettings.autoDownloadUpdates, juce::dontSendNotification);
+    setUpdateStatus(cachedSettings.autoDownloadUpdates ? "Auto-download is enabled." : "Auto-download is off.");
     refreshRunningApps();
     refreshEnabledProgramsList();
     if (cachedSettings.autoEnableProcessPath.isNotEmpty())
@@ -859,6 +909,16 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
                                                    "First Launch Guide",
                                                    guide);
+        });
+    }
+
+    if (cachedSettings.autoDownloadUpdates)
+    {
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::Timer::callAfterDelay(1200, [safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->triggerUpdateCheck(false);
         });
     }
 
@@ -1494,6 +1554,155 @@ void MainComponent::setEffectsHint(const juce::String& text, int ticks)
     effectsHintTicks = juce::jmax(0, ticks);
 }
 
+void MainComponent::setUpdateStatus(const juce::String& text, bool warning)
+{
+    updateStatusLabel.setColour(juce::Label::textColourId, warning ? juce::Colour(0xffffb3b3) : kUiTextMuted);
+    updateStatusLabel.setText(text, juce::dontSendNotification);
+}
+
+void MainComponent::triggerUpdateCheck(bool manualTrigger)
+{
+    if (updateCheckInFlight.exchange(true))
+    {
+        if (manualTrigger)
+            setUpdateStatus("Update check already running...");
+        return;
+    }
+
+    hasCheckedUpdatesThisSession = true;
+    setUpdateStatus("Checking for updates...");
+
+    const auto autoDownload = cachedSettings.autoDownloadUpdates;
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    std::thread([safeThis, autoDownload, manualTrigger]
+    {
+        juce::String status = "Update check failed.";
+        bool warning = false;
+
+        auto finish = [safeThis](juce::String message, bool warn, juce::String latestVersion)
+        {
+            juce::MessageManager::callAsync([safeThis, message = std::move(message), warn, latestVersion = std::move(latestVersion)]()
+            {
+                if (safeThis == nullptr)
+                    return;
+                safeThis->latestAvailableVersion = latestVersion;
+                safeThis->updateCheckInFlight.store(false);
+                safeThis->setUpdateStatus(message, warn);
+            });
+        };
+
+        juce::String latestVersion;
+        juce::String installerUrl;
+        bool hasUpdate = false;
+
+        {
+            juce::URL api("https://api.github.com/repos/softlynn/Fizzle/releases/latest");
+            auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                               .withExtraHeaders("User-Agent: Fizzle\r\nAccept: application/vnd.github+json\r\n")
+                               .withConnectionTimeoutMs(12000)
+                               .withNumRedirectsToFollow(4);
+            auto in = api.createInputStream(options);
+            if (in == nullptr)
+            {
+                finish("Could not contact update server.", true, {});
+                return;
+            }
+
+            const auto jsonText = in->readEntireStreamAsString();
+            const auto parsed = juce::JSON::parse(jsonText);
+            auto* root = parsed.getDynamicObject();
+            if (root == nullptr)
+            {
+                finish("Update response was invalid.", true, {});
+                return;
+            }
+
+            const auto tag = root->getProperty("tag_name").toString();
+            latestVersion = normalizeVersionTag(tag);
+            hasUpdate = compareSemver(latestVersion, FIZZLE_VERSION) > 0;
+
+            if (hasUpdate)
+            {
+                if (auto* assets = root->getProperty("assets").getArray())
+                {
+                    for (const auto& av : *assets)
+                    {
+                        auto* ao = av.getDynamicObject();
+                        if (ao == nullptr)
+                            continue;
+                        const auto name = ao->getProperty("name").toString();
+                        const auto url = ao->getProperty("browser_download_url").toString();
+                        if (name.endsWithIgnoreCase(".exe") && url.isNotEmpty())
+                        {
+                            installerUrl = url;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (! hasUpdate)
+        {
+            const auto msgPrefix = manualTrigger ? "No update found. " : juce::String{};
+            finish(msgPrefix + "You're up to date (" + juce::String(FIZZLE_VERSION) + ").", false, latestVersion);
+            return;
+        }
+
+        if (! autoDownload || installerUrl.isEmpty())
+        {
+            auto msg = "Update available: v" + latestVersion;
+            if (! autoDownload)
+                msg << " (enable auto-download to fetch automatically)";
+            finish(msg, false, latestVersion);
+            return;
+        }
+
+        auto downloadsDir = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("Downloads");
+        downloadsDir.createDirectory();
+        auto outFile = downloadsDir.getChildFile("Fizzle-Setup-" + latestVersion + ".exe");
+
+        juce::URL dl(installerUrl);
+        auto dlOptions = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                             .withExtraHeaders("User-Agent: Fizzle\r\n")
+                             .withConnectionTimeoutMs(30000)
+                             .withNumRedirectsToFollow(4);
+        auto dlIn = dl.createInputStream(dlOptions);
+        if (dlIn == nullptr)
+        {
+            finish("Update found, but download failed to start.", true, latestVersion);
+            return;
+        }
+
+        juce::TemporaryFile temp(outFile);
+        {
+            juce::FileOutputStream out(temp.getFile());
+            if (! out.openedOk())
+            {
+                finish("Update download failed (cannot write file).", true, latestVersion);
+                return;
+            }
+            const auto bytesWritten = out.writeFromInputStream(*dlIn, -1);
+            out.flush();
+            if (bytesWritten <= 0)
+            {
+                finish("Update download failed (empty response).", true, latestVersion);
+                return;
+            }
+        }
+
+        if (! temp.overwriteTargetFileWithTemporary())
+        {
+            finish("Update download failed (finalize error).", true, latestVersion);
+            return;
+        }
+
+        status = "Update v" + latestVersion + " downloaded to: " + outFile.getFullPathName();
+        warning = false;
+        finish(status, warning, latestVersion);
+    }).detach();
+}
+
 PresetData MainComponent::buildCurrentPresetData(const juce::String& name)
 {
     PresetData preset;
@@ -1919,6 +2128,25 @@ void MainComponent::buttonClicked(juce::Button* button)
                 setEffectsHint({}, 0);
             }
         }
+    }
+    else if (button == &autoDownloadUpdatesToggle)
+    {
+        cachedSettings.autoDownloadUpdates = autoDownloadUpdatesToggle.getToggleState();
+        saveCachedSettings();
+        if (cachedSettings.autoDownloadUpdates)
+        {
+            setUpdateStatus("Auto-download is enabled.");
+            if (! hasCheckedUpdatesThisSession)
+                triggerUpdateCheck(false);
+        }
+        else
+        {
+            setUpdateStatus("Auto-download is off.");
+        }
+    }
+    else if (button == &checkUpdatesButton)
+    {
+        triggerUpdateCheck(true);
     }
 }
 
@@ -2353,8 +2581,16 @@ void MainComponent::resized()
         content.removeFromTop(8);
         auto pathRow = content.removeFromTop(30);
         browseAppPathButton.setBounds(pathRow.removeFromLeft(120));
-        pathRow.removeFromLeft(gap);
-        closeSettingsButton.setBounds(pathRow.removeFromLeft(90));
+        content.removeFromTop(10);
+        updatesLabel.setBounds(content.removeFromTop(20));
+        autoDownloadUpdatesToggle.setBounds(content.removeFromTop(28));
+        content.removeFromTop(6);
+        auto updateRow = content.removeFromTop(28);
+        checkUpdatesButton.setBounds(updateRow.removeFromLeft(120));
+        content.removeFromTop(6);
+        updateStatusLabel.setBounds(content.removeFromTop(42));
+        content.removeFromTop(8);
+        closeSettingsButton.setBounds(content.removeFromTop(30).removeFromLeft(90));
     }
 }
 }

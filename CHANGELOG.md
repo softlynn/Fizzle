@@ -10,4 +10,5 @@
 - Preset save/load/delete flow.
 - Diagnostics panel with sample rate, buffer, latency, CPU, and drop counters.
 - First-launch in-app quick guide.
+- Optional auto-download updates in Settings.
 - Refreshed README and GitHub Pages website with install/use instructions.

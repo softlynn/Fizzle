@@ -8,6 +8,7 @@
 #include "MeterComponent.h"
 #include "DiagnosticsPanel.h"
 #include <vector>
+#include <atomic>
 
 namespace fizzle
 {
@@ -70,6 +71,8 @@ private:
     juce::Label appSearchLabel;
     juce::Label appListLabel;
     juce::Label enabledProgramsLabel;
+    juce::Label updatesLabel;
+    juce::Label updateStatusLabel;
     juce::Label settingsNavLabel;
     juce::TextButton settingsNavAutoEnableButton { "App Auto-Enable" };
     juce::TextEditor appSearchEditor;
@@ -77,6 +80,8 @@ private:
     juce::TextButton browseAppPathButton { "Browse..." };
     juce::TextButton removeProgramButton { "Remove Selected" };
     juce::TextButton closeSettingsButton { "Close" };
+    juce::ToggleButton autoDownloadUpdatesToggle { "Auto-download new updates" };
+    juce::TextButton checkUpdatesButton { "Check Now" };
     juce::ListBox appListBox { "Programs", nullptr };
     juce::ListBox enabledProgramsListBox { "Enabled Programs", nullptr };
     std::unique_ptr<juce::Component> settingsPanel;
@@ -106,6 +111,9 @@ private:
     bool suppressControlCallbacks { false };
     bool audioApplyQueued { false };
     bool applyingAudioSettings { false };
+    std::atomic<bool> updateCheckInFlight { false };
+    bool hasCheckedUpdatesThisSession { false };
+    juce::String latestAvailableVersion;
     EngineSettings cachedSettings;
     std::unique_ptr<ProgramListModel> programListModel;
     std::unique_ptr<ProgramListModel> enabledProgramListModel;
@@ -163,5 +171,7 @@ private:
     juce::String loadPersistedLastPresetName() const;
     void persistLastPresetName(const juce::String& presetName) const;
     void loadPresetByName(const juce::String& name);
+    void setUpdateStatus(const juce::String& text, bool warning = false);
+    void triggerUpdateCheck(bool manualTrigger);
 };
 }

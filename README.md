@@ -20,6 +20,7 @@
 - Runs from the tray with quick controls.
 - Saves presets so you can switch setups fast.
 - Includes a first-launch quick tutorial in the app.
+- Includes optional auto-download updates in Settings.
 
 ## 🚀 Install
 
@@ -45,6 +46,7 @@ If you skip it, use this:
 - Toggle **Effects On/Off** quickly.
 - Change preset from the **Preset** dropdown.
 - Use **Restart Audio** if your device changes.
+- In **Settings**, enable **Auto-download new updates** to fetch new installers automatically.
 
 ## 🛠️ Troubleshooting
 
