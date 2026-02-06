@@ -47,12 +47,12 @@ void MainWindow::closeButtonPressed()
 
 juce::BorderSize<int> MainWindow::getContentComponentBorder() const
 {
-    return {};
+    return { 4, 4, 4, 4 };
 }
 
 juce::BorderSize<int> MainWindow::getBorderThickness() const
 {
-    return { 10, 10, 10, 10 };
+    return { 14, 14, 14, 14 };
 }
 
 void MainWindow::setTransparentBackgroundEnabled(bool enabled)
@@ -75,6 +75,16 @@ void MainWindow::applyWindowsBackdrop(bool transparent)
             blur.dwFlags = DWM_BB_ENABLE;
             blur.fEnable = transparent ? TRUE : FALSE;
             DwmEnableBlurBehindWindow(hwnd, &blur);
+
+            MARGINS margins {};
+            if (transparent)
+            {
+                margins.cxLeftWidth = -1;
+                margins.cxRightWidth = -1;
+                margins.cyTopHeight = -1;
+                margins.cyBottomHeight = -1;
+            }
+            DwmExtendFrameIntoClientArea(hwnd, &margins);
 
             const int backdrop = transparent ? DWMSBT_MAINWINDOW : DWMSBT_NONE;
             DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));

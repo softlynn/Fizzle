@@ -276,7 +276,8 @@ public:
         const auto cx = icon.getCentreX();
         const auto cy = icon.getCentreY();
 
-        const auto winGlyph = juce::Colours::white.withAlpha(button.isDown() ? 0.95f : (button.isOver() ? 0.90f : 0.78f));
+        const auto baseGlyph = kUiText.contrasting(0.55f);
+        const auto winGlyph = baseGlyph.withAlpha(button.isDown() ? 0.95f : (button.isOver() ? 0.90f : 0.78f));
 
         if (id == "save")
         {
@@ -517,6 +518,12 @@ public:
         repaint();
     }
 
+    void setSidebarWidth(float width)
+    {
+        sidebarWidth = juce::jmax(120.0f, width);
+        repaint();
+    }
+
     juce::Rectangle<float> getPanelBounds() const
     {
         if (! panelBounds.isEmpty())
@@ -541,7 +548,7 @@ public:
         g.fillRoundedRectangle(panel, 18.0f);
         g.setColour(kUiAccent.withAlpha(0.58f));
         g.drawRoundedRectangle(panel, 18.0f, 1.4f);
-        auto sidebar = panel.removeFromLeft(180.0f);
+        auto sidebar = panel.removeFromLeft(juce::jmin(sidebarWidth, panel.getWidth() * 0.48f));
         g.setColour(kUiBg.withAlpha(0.78f));
         g.fillRoundedRectangle(sidebar, 16.0f);
         g.setColour(kUiAccent.withAlpha(0.22f));
@@ -557,6 +564,7 @@ public:
 private:
     std::function<void()> dismiss;
     juce::Rectangle<float> panelBounds;
+    float sidebarWidth { 180.0f };
 };
 
 class PluginEditorWindow final : public juce::DocumentWindow
@@ -636,17 +644,24 @@ public:
         name.setText(pluginName, juce::dontSendNotification);
         enabled.setToggleState(isEnabled, juce::dontSendNotification);
         mix.setValue(mixAmount, juce::dontSendNotification);
+        juce::Font nameFont(juce::FontOptions(14.8f * kUiControlScale, juce::Font::plain));
+        nameFont.setExtraKerningFactor(0.014f);
+        name.setFont(nameFont);
+        juce::Font mixFont(juce::FontOptions(11.4f * kUiControlScale, juce::Font::plain));
+        mixFont.setExtraKerningFactor(0.01f);
+        mixLabel.setFont(mixFont);
     }
 
     void resized() override
     {
         auto r = getLocalBounds().reduced(6, 3);
-        enabled.setBounds(r.removeFromLeft(48));
-        auto knobArea = r.removeFromRight(128);
-        auto knobBox = knobArea.removeFromRight(44);
-        mix.setBounds(knobBox.withSizeKeepingCentre(40, 40));
+        enabled.setBounds(r.removeFromLeft(juce::roundToInt(52.0f * kUiControlScale)));
+        auto knobArea = r.removeFromRight(juce::roundToInt(142.0f * kUiControlScale));
+        auto knobBox = knobArea.removeFromRight(juce::roundToInt(54.0f * kUiControlScale));
+        mix.setBounds(knobBox.withSizeKeepingCentre(juce::roundToInt(48.0f * kUiControlScale),
+                                                    juce::roundToInt(48.0f * kUiControlScale)));
         mixLabel.setBounds(knobArea.withTrimmedTop(10));
-        openButton.setBounds(r.removeFromRight(64));
+        openButton.setBounds(r.removeFromRight(juce::roundToInt(76.0f * kUiControlScale)));
         name.setBounds(r);
     }
 
@@ -1811,8 +1826,10 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
         {
             if (auto hwnd = static_cast<HWND>(peer->getNativeHandle()))
             {
+                draggingWindow = true;
                 ReleaseCapture();
                 SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+                draggingWindow = false;
                 return;
             }
         }
@@ -2194,10 +2211,10 @@ void MainComponent::applyThemePalette()
     if (lightMode)
     {
         kUiBg = juce::Colour(0xffe2e9f3);
-        kUiPanel = juce::Colour(0xffedf2f9);
-        kUiPanelSoft = juce::Colour(0xffdbe5f2);
-        kUiText = juce::Colour(0xff17253a);
-        kUiTextMuted = juce::Colour(0xff425a79);
+        kUiPanel = juce::Colour(0xfff0f4fa);
+        kUiPanelSoft = juce::Colour(0xffdce5f2);
+        kUiText = juce::Colour(0xff132138);
+        kUiTextMuted = juce::Colour(0xff395473);
     }
     else
     {
@@ -2221,7 +2238,7 @@ void MainComponent::applyThemePalette()
         kUiMint = lightMode ? juce::Colour(0xff66aac8) : juce::Colour(0xff9af7d8);
     }
 
-    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.90f : 0.84f) : 1.0f;
+    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.86f : 0.80f) : 1.0f;
 
     theme::background = kUiBg;
     theme::panel = kUiPanel;
@@ -2288,6 +2305,7 @@ void MainComponent::applyThemePalette()
         editor->setColour(juce::TextEditor::backgroundColourId, kUiPanel.withAlpha(0.72f));
         editor->setColour(juce::TextEditor::outlineColourId, kUiAccent.withAlpha(0.24f));
         editor->setColour(juce::TextEditor::textColourId, kUiText);
+        editor->setColour(juce::TextEditor::highlightedTextColourId, lightMode ? juce::Colour(0xff102038) : juce::Colours::white);
         editor->setColour(juce::TextEditor::highlightColourId, kUiAccent.withAlpha(0.24f));
     }
 
@@ -2303,16 +2321,16 @@ void MainComponent::applyUiDensity()
     switch (cachedSettings.uiDensity)
     {
         case 0:
-            uiScale = 0.92f;
-            kUiControlScale = 0.95f;
+            uiScale = 0.96f;
+            kUiControlScale = 0.98f;
             break;
         case 2:
-            uiScale = 1.30f;
-            kUiControlScale = 1.22f;
+            uiScale = 1.44f;
+            kUiControlScale = 1.34f;
             break;
         default:
-            uiScale = 1.08f;
-            kUiControlScale = 1.08f;
+            uiScale = 1.16f;
+            kUiControlScale = 1.14f;
             break;
     }
 
@@ -3417,6 +3435,7 @@ juce::Component* MainComponent::refreshComponentForRow(int rowNumber, bool isRow
 
 void MainComponent::paint(juce::Graphics& g)
 {
+    const bool transparentMode = cachedSettings.transparentBackground;
     auto shell = getLocalBounds().toFloat().reduced(6.0f, 2.0f);
     constexpr float shellRadius = 25.0f;
     auto makePanelPath = [](juce::Rectangle<float> r, float radius)
@@ -3434,26 +3453,35 @@ void MainComponent::paint(juce::Graphics& g)
     juce::ColourGradient bg(kUiBg.brighter(0.05f), shell.getX(), shell.getY(),
                             kUiBg.darker(0.14f), shell.getX(), shell.getBottom(), false);
     g.setGradientFill(bg);
-    g.fillAll(juce::Colours::transparentBlack);
-    g.setOpacity(kUiBackgroundAlphaScale);
-    g.fillRect(getLocalBounds());
-    g.setOpacity(1.0f);
-    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.022f);
     g.fillRect(shell.toNearestInt());
+    g.setOpacity(kUiBackgroundAlphaScale);
+    g.fillPath(shellPath);
+    g.setOpacity(1.0f);
+    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, transparentMode ? 0.012f : 0.022f);
+    g.fillPath(shellPath);
 
     auto outer = shell.expanded(2.0f, 1.6f);
-    g.setColour(kUiAccent.withAlpha(0.065f));
-    g.strokePath(makePanelPath(outer, shellRadius + 2.0f), juce::PathStrokeType(1.4f));
-    g.setColour(kUiSalmon.withAlpha(0.045f));
-    g.strokePath(makePanelPath(shell.expanded(0.9f, 0.8f), shellRadius + 0.8f), juce::PathStrokeType(0.9f));
+    g.setColour(kUiAccent.withAlpha(transparentMode ? 0.085f : 0.065f));
+    g.strokePath(makePanelPath(outer, shellRadius + 2.0f), juce::PathStrokeType(transparentMode ? 1.7f : 1.4f));
+    g.setColour(kUiSalmon.withAlpha(transparentMode ? 0.060f : 0.045f));
+    g.strokePath(makePanelPath(shell.expanded(0.9f, 0.8f), shellRadius + 0.8f), juce::PathStrokeType(transparentMode ? 1.05f : 0.9f));
 
     auto card = shell.reduced(2.0f, 1.0f);
-    juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(0.90f * kUiBackgroundAlphaScale), card.getX(), card.getY(),
-                                  kUiPanel.withAlpha(0.96f * kUiBackgroundAlphaScale), card.getX(), card.getBottom(), false);
+    const auto cardTopAlpha = transparentMode ? 0.56f : 0.90f;
+    const auto cardBottomAlpha = transparentMode ? 0.68f : 0.96f;
+    juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(cardTopAlpha * kUiBackgroundAlphaScale), card.getX(), card.getY(),
+                                  kUiPanel.withAlpha(cardBottomAlpha * kUiBackgroundAlphaScale), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
     g.fillPath(makePanelPath(card, 21.0f));
-    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, 0.014f);
+    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, transparentMode ? 0.010f : 0.014f);
     g.fillPath(makePanelPath(card, 21.0f));
+
+    juce::ColourGradient gloss(juce::Colours::white.withAlpha(transparentMode ? 0.12f : 0.08f),
+                               card.getX(), card.getY(),
+                               juce::Colours::white.withAlpha(0.0f),
+                               card.getX(), card.getY() + card.getHeight() * 0.38f, false);
+    g.setGradientFill(gloss);
+    g.fillRoundedRectangle(card.removeFromTop(card.getHeight() * 0.46f), 21.0f);
 
     auto header = headerBounds.toFloat().expanded(2.0f, 1.0f);
     auto headerBand = header;
@@ -3462,20 +3490,20 @@ void MainComponent::paint(juce::Graphics& g)
     headerPath.addRoundedRectangle(headerBand.getX(), headerBand.getY(), headerBand.getWidth(), headerBand.getHeight(),
                                    15.0f, 15.0f,
                                    true, true, false, false);
-    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(0.52f), headerBand.getX(), headerBand.getY(),
-                                    kUiPanel.withAlpha(0.07f), headerBand.getX(), headerBand.getBottom(), false);
+    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(transparentMode ? 0.40f : 0.52f), headerBand.getX(), headerBand.getY(),
+                                    kUiPanel.withAlpha(transparentMode ? 0.04f : 0.07f), headerBand.getX(), headerBand.getBottom(), false);
     g.setGradientFill(headerFill);
     g.fillPath(headerPath);
-    g.setColour(kUiAccent.withAlpha(0.11f));
+    g.setColour(kUiAccent.withAlpha(transparentMode ? 0.16f : 0.11f));
     g.strokePath(headerPath, juce::PathStrokeType(0.9f));
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.03f : 0.02f));
     g.fillRoundedRectangle(chainPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.16f));
     g.drawRoundedRectangle(chainPane, 10.0f, 1.1f);
     auto diagPane = diagnostics.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.03f : 0.02f));
     g.fillRoundedRectangle(diagPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);
@@ -3499,11 +3527,19 @@ void MainComponent::paint(juce::Graphics& g)
                           juce::RectanglePlacement::centred);
     }
 
-    const auto micIcon = inputIconBounds.toFloat();
+    const auto micIcon = inputIconBounds.toFloat().reduced(0.8f);
+    const auto mcx = micIcon.getCentreX();
+    const auto mTop = micIcon.getY() + micIcon.getHeight() * 0.10f;
+    const auto mBodyW = micIcon.getWidth() * 0.44f;
+    const auto mBodyH = micIcon.getHeight() * 0.56f;
     g.setColour(kUiText);
-    g.drawRoundedRectangle(micIcon.getX() + 3.5f, micIcon.getY() + 2.0f, 7.0f, 8.0f, 2.8f, 1.2f);
-    g.drawLine(micIcon.getCentreX(), micIcon.getY() + 10.2f, micIcon.getCentreX(), micIcon.getBottom() - 1.8f, 1.2f);
-    g.drawLine(micIcon.getCentreX() - 2.4f, micIcon.getBottom() - 1.8f, micIcon.getCentreX() + 2.4f, micIcon.getBottom() - 1.8f, 1.2f);
+    g.drawRoundedRectangle(mcx - mBodyW * 0.5f, mTop, mBodyW, mBodyH, mBodyW * 0.45f, 1.35f);
+    juce::Path micArc;
+    micArc.addCentredArc(mcx, mTop + mBodyH * 0.96f, mBodyW * 0.78f, mBodyH * 0.44f, 0.0f,
+                         juce::MathConstants<float>::pi, juce::MathConstants<float>::twoPi, true);
+    g.strokePath(micArc, juce::PathStrokeType(1.2f));
+    g.drawLine(mcx, mTop + mBodyH + mBodyH * 0.30f, mcx, micIcon.getBottom() - 2.2f, 1.2f);
+    g.drawLine(mcx - mBodyW * 0.42f, micIcon.getBottom() - 2.2f, mcx + mBodyW * 0.42f, micIcon.getBottom() - 2.2f, 1.2f);
 
     auto fizzleMicIcon = outputIconBounds.toFloat().reduced(0.4f);
     g.setColour(kUiAccent.withAlpha(0.18f));
@@ -3677,17 +3713,42 @@ void MainComponent::resized()
 
     area.removeFromTop(gap);
     auto actions = area.removeFromTop(juce::roundToInt(36.0f * uiScale));
-    const int saveW = juce::roundToInt(134.0f * uiScale);
-    const int deleteW = juce::roundToInt(114.0f * uiScale);
-    const int buttonW = juce::jmax(82, (actions.getWidth() - saveW - deleteW - (gap * 7)) / 6);
+    int saveW = juce::roundToInt(132.0f * uiScale);
+    int deleteW = juce::roundToInt(108.0f * uiScale);
+    int restartW = juce::roundToInt(126.0f * uiScale);
+    int aboutW = juce::roundToInt(96.0f * uiScale);
+    int toneW = juce::roundToInt(96.0f * uiScale);
+    int effectsW = juce::roundToInt(110.0f * uiScale);
+    int listenW = juce::roundToInt(106.0f * uiScale);
+    int settingsW = juce::roundToInt(106.0f * uiScale);
+
+    const int availableW = actions.getWidth() - (gap * 7);
+    int requestedW = saveW + deleteW + restartW + aboutW + toneW + effectsW + listenW + settingsW;
+    if (requestedW > availableW && availableW > 0)
+    {
+        const float scale = static_cast<float>(availableW) / static_cast<float>(requestedW);
+        auto scaleDown = [scale](int value, int minValue)
+        {
+            return juce::jmax(minValue, juce::roundToInt(static_cast<float>(value) * scale));
+        };
+        saveW = scaleDown(saveW, juce::roundToInt(100.0f * uiScale));
+        deleteW = scaleDown(deleteW, juce::roundToInt(84.0f * uiScale));
+        restartW = scaleDown(restartW, juce::roundToInt(98.0f * uiScale));
+        aboutW = scaleDown(aboutW, juce::roundToInt(76.0f * uiScale));
+        toneW = scaleDown(toneW, juce::roundToInt(74.0f * uiScale));
+        effectsW = scaleDown(effectsW, juce::roundToInt(90.0f * uiScale));
+        listenW = scaleDown(listenW, juce::roundToInt(86.0f * uiScale));
+        settingsW = scaleDown(settingsW, juce::roundToInt(86.0f * uiScale));
+    }
+
     savePresetButton.setBounds(actions.removeFromLeft(saveW)); actions.removeFromLeft(gap);
     deletePresetButton.setBounds(actions.removeFromLeft(deleteW)); actions.removeFromLeft(gap);
-    restartButton.setBounds(actions.removeFromLeft(buttonW)); actions.removeFromLeft(gap);
-    aboutButton.setBounds(actions.removeFromLeft(buttonW)); actions.removeFromLeft(gap);
-    toneButton.setBounds(actions.removeFromLeft(buttonW)); actions.removeFromLeft(gap);
-    effectsToggle.setBounds(actions.removeFromLeft(buttonW)); actions.removeFromLeft(gap);
-    routeSpeakersButton.setBounds(actions.removeFromLeft(buttonW)); actions.removeFromLeft(gap);
-    settingsButton.setBounds(actions.removeFromLeft(buttonW));
+    restartButton.setBounds(actions.removeFromLeft(restartW)); actions.removeFromLeft(gap);
+    aboutButton.setBounds(actions.removeFromLeft(aboutW)); actions.removeFromLeft(gap);
+    toneButton.setBounds(actions.removeFromLeft(toneW)); actions.removeFromLeft(gap);
+    effectsToggle.setBounds(actions.removeFromLeft(effectsW)); actions.removeFromLeft(gap);
+    routeSpeakersButton.setBounds(actions.removeFromLeft(listenW)); actions.removeFromLeft(gap);
+    settingsButton.setBounds(actions.removeFromLeft(settingsW));
 
     area.removeFromTop(gap);
     auto gainRow = area.removeFromTop(juce::roundToInt(30.0f * uiScale));
@@ -3757,8 +3818,10 @@ void MainComponent::resized()
         if (auto* overlay = dynamic_cast<SettingsOverlay*>(settingsPanel.get()))
             overlay->setPanelBounds(panel);
 
-        const int sidebarW = juce::jlimit(150, juce::jmax(220, panel.getWidth() / 3), juce::roundToInt(196.0f * uiScale));
+        const int sidebarW = juce::jlimit(154, juce::jmax(220, panel.getWidth() / 3), juce::roundToInt(204.0f * uiScale));
         auto sidebar = panel.removeFromLeft(sidebarW).reduced(juce::roundToInt(12.0f * uiScale));
+        if (auto* overlay = dynamic_cast<SettingsOverlay*>(settingsPanel.get()))
+            overlay->setSidebarWidth(static_cast<float>(sidebarW));
         const int navRowH = juce::roundToInt(32.0f * uiScale);
         const int navGap = juce::jmax(4, juce::roundToInt(6.0f * uiScale));
         settingsNavLabel.setBounds(sidebar.removeFromTop(juce::roundToInt(24.0f * uiScale)));

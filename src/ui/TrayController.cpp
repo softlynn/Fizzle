@@ -65,7 +65,7 @@ public:
         setColour(juce::PopupMenu::backgroundColourId, trayBg);
         setColour(juce::PopupMenu::textColourId, trayText);
         setColour(juce::PopupMenu::highlightedBackgroundColourId, trayHover.withAlpha(0.95f));
-        setColour(juce::PopupMenu::highlightedTextColourId, juce::Colours::white);
+        setColour(juce::PopupMenu::highlightedTextColourId, lightMode ? juce::Colour(0xff112036) : juce::Colours::white);
     }
 
     int getPopupMenuBorderSize() override
