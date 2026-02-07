@@ -12,6 +12,8 @@ public:
     explicit DiagnosticsPanel(AudioEngine& e) : engine(e)
     {
         addAndMakeVisible(text);
+        setInterceptsMouseClicks(false, false);
+        text.setInterceptsMouseClicks(false, false);
         text.setMultiLine(true);
         text.setReadOnly(true);
         text.setScrollbarsShown(true);
@@ -25,7 +27,8 @@ public:
         text.setColour(juce::TextEditor::outlineColourId, juce::Colour(0x00000000));
         text.setColour(juce::TextEditor::highlightColourId, theme::accent.withAlpha(0.22f));
         text.setColour(juce::TextEditor::textColourId, theme::text);
-        juce::Font font(juce::FontOptions(15.0f * uiScale));
+        juce::Font font(juce::FontOptions(14.6f * uiScale));
+        font.setTypefaceName("Consolas");
         font.setExtraKerningFactor(0.014f);
         text.applyFontToAllText(font);
         repaint();
@@ -58,17 +61,22 @@ private:
                 return juce::String("-inf dB");
             return juce::String(juce::Decibels::gainToDecibels(v), 1) + " dB";
         };
+        const auto line = [](juce::String key, juce::String value)
+        {
+            key = key.paddedRight(' ', 14);
+            return key + " : " + value + "\n";
+        };
         juce::String s;
-        s << "Input Device    : " << d.inputDevice << "\n";
-        s << "Output Device   : " << d.outputDevice << "\n";
-        s << "Sample Rate     : " << juce::String(d.sampleRate, 1) << " Hz\n";
-        s << "Buffer Size     : " << d.bufferSize << "\n";
-        s << "CPU Load        : " << juce::String(d.cpuPercent, 2) << "%\n";
-        s << "Latency (Dry)   : " << juce::String(d.dryLatencyMs, 1) << " ms\n";
-        s << "Latency (Post)  : " << juce::String(d.postFxLatencyMs, 1) << " ms\n";
-        s << "Input Level     : " << levelToText(d.inputLevel) << "\n";
-        s << "Output Level    : " << levelToText(d.outputLevel) << "\n";
-        s << "Dropped Buffers : " << juce::String(static_cast<int64_t>(d.droppedBuffers)) << "\n";
+        s << line("Input Device", d.inputDevice);
+        s << line("Output Device", d.outputDevice);
+        s << line("Sample Rate", juce::String(d.sampleRate, 1) + " Hz");
+        s << line("Buffer Size", juce::String(d.bufferSize));
+        s << line("CPU Load", juce::String(d.cpuPercent, 2) + "%");
+        s << line("Latency (Dry)", juce::String(d.dryLatencyMs, 1) + " ms");
+        s << line("Latency (Post)", juce::String(d.postFxLatencyMs, 1) + " ms");
+        s << line("Input Level", levelToText(d.inputLevel));
+        s << line("Output Level", levelToText(d.outputLevel));
+        s << line("Dropped Buffers", juce::String(static_cast<int64_t>(d.droppedBuffers)));
         text.setText(s, false);
     }
 };

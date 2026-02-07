@@ -26,6 +26,7 @@ EngineSettings fromVar(const juce::var& data)
         if (out.autoEnableProcessNames.isEmpty() && out.autoEnableProcessName.isNotEmpty())
             out.autoEnableProcessNames.add(out.autoEnableProcessName);
         out.autoEnableProcessPath = obj->getProperty("autoEnableProcessPath").toString();
+        out.listenMonitorDeviceName = obj->getProperty("listenMonitorDeviceName").toString();
         out.lastPresetName = obj->getProperty("lastPresetName").toString();
         out.hasSeenFirstLaunchGuide = obj->hasProperty("hasSeenFirstLaunchGuide")
                                           ? static_cast<bool>(obj->getProperty("hasSeenFirstLaunchGuide"))
@@ -62,6 +63,11 @@ EngineSettings fromVar(const juce::var& data)
             for (const auto& v : *arr)
                 out.scannedVstPaths.add(v.toString());
         }
+        if (auto* arr = obj->getProperty("vstSearchPaths").getArray())
+        {
+            for (const auto& v : *arr)
+                out.vstSearchPaths.add(v.toString());
+        }
     }
     return out;
 }
@@ -83,6 +89,7 @@ juce::var toVar(const EngineSettings& settings)
         enabledNames.add(n);
     obj->setProperty("autoEnableProcessNames", enabledNames);
     obj->setProperty("autoEnableProcessPath", settings.autoEnableProcessPath);
+    obj->setProperty("listenMonitorDeviceName", settings.listenMonitorDeviceName);
     obj->setProperty("lastPresetName", settings.lastPresetName);
     obj->setProperty("hasSeenFirstLaunchGuide", settings.hasSeenFirstLaunchGuide);
     obj->setProperty("autoInstallUpdates", settings.autoInstallUpdates);
@@ -99,6 +106,10 @@ juce::var toVar(const EngineSettings& settings)
     for (const auto& p : settings.scannedVstPaths)
         paths.add(p);
     obj->setProperty("scannedVstPaths", paths);
+    juce::Array<juce::var> searchPaths;
+    for (const auto& p : settings.vstSearchPaths)
+        searchPaths.add(p);
+    obj->setProperty("vstSearchPaths", searchPaths);
     return obj;
 }
 }

@@ -28,6 +28,7 @@ public:
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
+    bool keyPressed(const juce::KeyPress& key) override;
 
     void refreshPresets();
     void onWindowVisible();
@@ -115,6 +116,12 @@ private:
     juce::TextButton updatesWebsiteButton { "Open Website" };
     juce::Label updatesLinksLabel;
     juce::Label startupLabel;
+    juce::Label behaviorListenDeviceLabel;
+    juce::ComboBox behaviorListenDeviceBox;
+    juce::Label behaviorVstFoldersLabel;
+    juce::ListBox behaviorVstFoldersListBox { "VST Search Folders", nullptr };
+    juce::TextButton behaviorAddVstFolderButton { "Add Folder..." };
+    juce::TextButton behaviorRemoveVstFolderButton { "Remove Folder" };
     juce::ToggleButton startWithWindowsToggle { "Start with Windows" };
     juce::ToggleButton startMinimizedToggle { "Start minimized to tray" };
     juce::ToggleButton followAutoEnableWindowToggle { "Open/close window with Program Auto-Enable" };
@@ -162,6 +169,7 @@ private:
     EngineSettings cachedSettings;
     std::unique_ptr<ProgramListModel> programListModel;
     std::unique_ptr<ProgramListModel> enabledProgramListModel;
+    std::unique_ptr<ProgramListModel> vstSearchPathListModel;
     std::vector<int> filteredProgramIndices;
     int selectedProgramRow { -1 };
     int selectedEnabledProgramRow { -1 };
@@ -171,6 +179,10 @@ private:
     juce::Rectangle<int> outputIconBounds;
     juce::ComponentDragger windowDragger;
     bool draggingWindow { false };
+    bool draggingResizeGrip { false };
+    juce::Point<int> resizeDragStartScreen;
+    juce::Rectangle<int> resizeStartBounds;
+    juce::Rectangle<int> resizeGripBounds;
     bool windowMaximized { false };
     juce::Rectangle<int> windowRestoreBounds;
     struct RunningAppEntry
@@ -192,7 +204,31 @@ private:
     float restartOverlayTargetAlpha { 0.0f };
     int restartOverlayTicks { 0 };
     juce::String restartOverlayText;
+    int settingsScrollY { 0 };
+    int settingsScrollMax { 0 };
+    int uiTimerHz { 30 };
     float uiScale { 1.0f };
+    struct FizzBubble
+    {
+        juce::Point<float> pos;
+        float radius { 0.0f };
+        float speed { 0.0f };
+        float drift { 0.0f };
+        float alpha { 0.0f };
+    };
+    std::vector<FizzBubble> logoFizzBubbles;
+    bool logoFizzActive { false };
+    int logoFizzTicks { 0 };
+    struct RemovedPluginSnapshot
+    {
+        juce::PluginDescription description;
+        juce::String base64State;
+        bool enabled { true };
+        float mix { 1.0f };
+        int index { -1 };
+        bool valid { false };
+    };
+    RemovedPluginSnapshot lastRemovedPlugin;
 
     void buttonClicked(juce::Button* button) override;
     void comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged) override;
@@ -209,6 +245,10 @@ private:
     void refreshRunningApps();
     void refreshProgramsList();
     void refreshEnabledProgramsList();
+    void refreshListenOutputDevices();
+    void refreshVstSearchPathList();
+    void addVstSearchPath(const juce::String& path);
+    void removeSelectedVstSearchPath();
     void selectProgramByRow(int row);
     bool addAutoEnableProgramFromPath(const juce::String& pathText);
     void removeSelectedProgram();
@@ -227,6 +267,8 @@ private:
     void dragHoverRow(int row);
     void finishRowDrag(int row);
     void setRowMix(int row, float mix);
+    void setRowEnabled(int row, bool enabled);
+    void rowQuickActionMenu(int row, juce::Point<int> screenPosition);
     void rowOpenEditor(int row);
     void closePluginEditorWindow();
     bool computeAutoEnableShouldEnable(bool& hasCondition) const;
@@ -243,6 +285,11 @@ private:
     void updateSettingsTabVisibility();
     void setActiveSettingsTab(int tab);
     void triggerButtonFlash(juce::Button* button);
+    void showFirstLaunchGuide();
+    void triggerLogoFizzAnimation();
+    void capturePluginSnapshotForUndo(int index);
+    void restoreLastRemovedPlugin();
+    bool removePluginAtIndex(int index, bool captureUndo = true);
     void applyWindowsStartupSetting();
     void toggleWindowMaximize();
     void applyEffectsEnabledState(bool enabled, bool fromUserToggle);
@@ -250,5 +297,6 @@ private:
     void applyThemePalette();
     void applyUiDensity();
     void refreshAppearanceControls();
+    void scrollSettingsContent(int deltaPixels);
 };
 }

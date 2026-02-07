@@ -40,6 +40,7 @@ struct EngineSettings
     juce::String autoEnableProcessName;
     juce::StringArray autoEnableProcessNames;
     juce::String autoEnableProcessPath;
+    juce::String listenMonitorDeviceName;
     juce::String lastPresetName;
     bool hasSeenFirstLaunchGuide { false };
     bool autoInstallUpdates { false };
@@ -50,5 +51,6 @@ struct EngineSettings
     bool transparentBackground { false };
     int themeVariant { 0 }; // 0 = Aqua, 1 = Salmon
     int uiDensity { 1 }; // 0 = Small (Compact), 1 = Normal, 2 = Large
+    juce::StringArray vstSearchPaths;
 };
 }

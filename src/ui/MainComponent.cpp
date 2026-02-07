@@ -82,14 +82,17 @@ void syncBufferBoxSelection(juce::ComboBox& comboBox, int selectedBuffer)
 
 juce::Image createDitherNoiseTile()
 {
-    juce::Image img(juce::Image::ARGB, 64, 64, true);
-    juce::Random random(0x50721);
+    juce::Image img(juce::Image::ARGB, 96, 96, true);
+    juce::Random random(0x5F177E);
     for (int y = 0; y < img.getHeight(); ++y)
     {
         for (int x = 0; x < img.getWidth(); ++x)
         {
-            const auto v = static_cast<uint8_t>(128 + random.nextInt(25) - 12);
-            img.setPixelAt(x, y, juce::Colour(v, v, v));
+            const auto n = random.nextInt(33) - 16;
+            const auto v = static_cast<uint8_t>(128 + n);
+            const auto b = static_cast<uint8_t>(126 + (n / 2));
+            const auto a = static_cast<uint8_t>(18 + random.nextInt(24));
+            img.setPixelAt(x, y, juce::Colour(v, v, b, a));
         }
     }
     return img;
@@ -163,15 +166,25 @@ class ModernLookAndFeel final : public juce::LookAndFeel_V4
 public:
     ModernLookAndFeel()
     {
+        refreshThemeColours();
+    }
+
+    void refreshThemeColours()
+    {
         setColour(juce::ComboBox::backgroundColourId, kUiPanelSoft);
         setColour(juce::ComboBox::outlineColourId, kUiAccent.withAlpha(0.26f));
         setColour(juce::ComboBox::textColourId, kUiText);
         setColour(juce::TextButton::buttonColourId, kUiPanel);
         setColour(juce::TextButton::textColourOffId, kUiText);
+        setColour(juce::TextButton::textColourOnId, kUiText);
         setColour(juce::Label::textColourId, kUiText);
         setColour(juce::ToggleButton::textColourId, kUiText);
         setColour(juce::Slider::trackColourId, kUiAccent.withAlpha(0.68f));
         setColour(juce::Slider::thumbColourId, kUiAccentSoft);
+        setColour(juce::Slider::textBoxTextColourId, kUiText);
+        setColour(juce::Slider::textBoxBackgroundColourId, kUiPanelSoft.withAlpha(0.9f));
+        setColour(juce::Slider::textBoxOutlineColourId, kUiAccent.withAlpha(0.30f));
+        setColour(juce::Slider::textBoxHighlightColourId, kUiAccent.withAlpha(0.20f));
         setColour(juce::TextEditor::backgroundColourId, kUiPanel.withAlpha(0.7f));
         setColour(juce::TextEditor::outlineColourId, kUiAccent.withAlpha(0.22f));
         setColour(juce::TextEditor::textColourId, kUiText);
@@ -180,6 +193,8 @@ public:
         setColour(juce::AlertWindow::textColourId, kUiText);
         setColour(juce::PopupMenu::backgroundColourId, kUiPanel);
         setColour(juce::PopupMenu::textColourId, kUiText);
+        setColour(juce::PopupMenu::highlightedBackgroundColourId, kUiAccent.withAlpha(0.22f));
+        setColour(juce::PopupMenu::highlightedTextColourId, kUiText);
     }
 
     void drawButtonBackground(juce::Graphics& g,
@@ -221,19 +236,42 @@ public:
         }
 
         auto c = kUiPanel.withAlpha(0.94f);
+        const bool lightPalette = kUiBg.getPerceivedBrightness() > 0.47f;
         if (button.getToggleState())
             c = kUiAccent.withAlpha(0.32f);
-        if (isMouseOver) c = c.brighter(0.08f);
-        if (isButtonDown) c = c.brighter(0.14f);
+        if (isMouseOver)
+        {
+            if (lightPalette)
+                c = c.interpolatedWith(kUiAccentSoft, button.getToggleState() ? 0.24f : 0.17f);
+            else
+                c = c.brighter(0.08f);
+        }
+        if (isButtonDown)
+        {
+            if (lightPalette)
+                c = c.interpolatedWith(kUiAccent, button.getToggleState() ? 0.34f : 0.22f);
+            else
+                c = c.brighter(0.14f);
+        }
         auto b = button.getLocalBounds().toFloat();
         juce::ColourGradient fill(c.brighter(0.03f), b.getX(), b.getY(),
                                   c.darker(0.1f), b.getX(), b.getBottom(), false);
         g.setGradientFill(fill);
         g.fillRoundedRectangle(b, 11.0f);
-        g.setColour(juce::Colours::white.withAlpha(0.05f));
+        if (lightPalette && isMouseOver)
+        {
+            g.setColour(kUiAccent.withAlpha(isButtonDown ? 0.20f : 0.13f));
+            g.fillRoundedRectangle(b.reduced(0.8f), 10.2f);
+        }
+        g.setColour(juce::Colours::white.withAlpha(lightPalette ? 0.12f : 0.05f));
         g.drawRoundedRectangle(b.reduced(0.7f), 10.3f, 0.9f);
-        g.setColour(kUiAccent.withAlpha(button.getToggleState() ? 0.30f : 0.14f));
-        g.drawRoundedRectangle(b.reduced(0.3f), 10.8f, 1.1f);
+        const auto outlineAlpha = button.getToggleState()
+                                      ? (lightPalette ? 0.66f : 0.30f)
+                                      : (lightPalette ? (isMouseOver ? 0.56f : 0.36f)
+                                                      : (isMouseOver ? 0.24f : 0.14f));
+        g.setColour(kUiAccent.withAlpha(outlineAlpha));
+        g.drawRoundedRectangle(b.reduced(0.3f), 10.8f, isMouseOver ? (lightPalette ? 1.7f : 1.4f)
+                                                                    : (lightPalette ? 1.25f : 1.1f));
     }
 
     void drawButtonText(juce::Graphics& g,
@@ -453,9 +491,12 @@ public:
                           juce::Slider& slider) override
     {
         juce::ignoreUnused(minSliderPos, maxSliderPos, style, slider);
+        const bool lightPalette = kUiBg.getPerceivedBrightness() > 0.47f;
         auto track = juce::Rectangle<float>(static_cast<float>(x), static_cast<float>(y + height / 2 - 3), static_cast<float>(width), 6.0f);
-        g.setColour(kUiPanelSoft.withAlpha(0.9f));
+        g.setColour((lightPalette ? kUiPanelSoft.darker(0.12f) : kUiPanelSoft).withAlpha(0.95f));
         g.fillRoundedRectangle(track, 3.0f);
+        g.setColour(kUiAccent.withAlpha(lightPalette ? 0.30f : 0.20f));
+        g.drawRoundedRectangle(track, 3.0f, 1.0f);
 
         auto active = track.withRight(sliderPos);
         juce::ColourGradient fill(kUiAccent, active.getX(), active.getY(),
@@ -466,8 +507,8 @@ public:
         auto knob = juce::Rectangle<float>(sliderPos - 7.0f, track.getCentreY() - 7.0f, 14.0f, 14.0f);
         g.setColour(kUiAccentSoft);
         g.fillEllipse(knob);
-        g.setColour(juce::Colours::white.withAlpha(0.28f));
-        g.drawEllipse(knob, 1.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.55f));
+        g.drawEllipse(knob, 1.1f);
     }
 
     void drawRotarySlider(juce::Graphics& g,
@@ -507,8 +548,8 @@ public:
 class SettingsOverlay final : public juce::Component
 {
 public:
-    explicit SettingsOverlay(std::function<void()> dismissFn)
-        : dismiss(std::move(dismissFn))
+    explicit SettingsOverlay(std::function<void()> dismissFn, std::function<void(int)> scrollFn)
+        : dismiss(std::move(dismissFn)), scroll(std::move(scrollFn))
     {
     }
 
@@ -561,8 +602,19 @@ public:
             dismiss();
     }
 
+    void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
+    {
+        if (! getPanelBounds().contains(e.position) || scroll == nullptr)
+            return;
+
+        const auto delta = juce::roundToInt(-wheel.deltaY * 96.0f);
+        if (delta != 0)
+            scroll(delta);
+    }
+
 private:
     std::function<void()> dismiss;
+    std::function<void(int)> scroll;
     juce::Rectangle<float> panelBounds;
     float sidebarWidth { 180.0f };
 };
@@ -603,9 +655,10 @@ public:
     using OpenFn = std::function<void(int)>;
     using MixFn = std::function<void(int, float)>;
     using ToggleFn = std::function<void(int)>;
+    using MenuFn = std::function<void(int, juce::Point<int>)>;
 
-    VstRowComponent(DragStart ds, DragHover dh, DragEnd de, OpenFn op, MixFn mx, ToggleFn tg)
-        : dragStart(std::move(ds)), dragHover(std::move(dh)), dragEnd(std::move(de)), open(std::move(op)), setMix(std::move(mx)), toggle(std::move(tg))
+    VstRowComponent(DragStart ds, DragHover dh, DragEnd de, OpenFn op, MixFn mx, ToggleFn tg, MenuFn mf)
+        : dragStart(std::move(ds)), dragHover(std::move(dh)), dragEnd(std::move(de)), open(std::move(op)), setMix(std::move(mx)), toggle(std::move(tg)), showMenu(std::move(mf))
     {
         addAndMakeVisible(name);
         addAndMakeVisible(mix);
@@ -668,30 +721,34 @@ public:
     void paint(juce::Graphics& g) override
     {
         const auto b = getLocalBounds().toFloat();
-        auto fill = kUiPanelSoft.withAlpha(0.78f);
-        auto border = kUiAccent.withAlpha(0.18f);
+        const bool lightPalette = kUiBg.getPerceivedBrightness() > 0.47f;
+        auto fill = (lightPalette ? kUiPanel.brighter(0.08f) : kUiPanelSoft).withAlpha(lightPalette ? 0.92f : 0.78f);
+        auto border = kUiAccent.withAlpha(lightPalette ? 0.24f : 0.18f);
         if (selected)
         {
-            fill = kUiPanel.withAlpha(0.94f);
-            border = kUiAccent.withAlpha(0.85f);
+            fill = (lightPalette ? kUiPanelSoft.brighter(0.18f) : kUiPanel).withAlpha(0.94f);
+            border = kUiAccent.withAlpha(lightPalette ? 0.64f : 0.85f);
         }
         if (dragging)
         {
             fill = fill.brighter(0.08f);
             border = kUiAccentSoft;
             g.setColour(juce::Colours::black.withAlpha(0.35f));
-            g.fillRoundedRectangle(b.translated(0.0f, 2.0f), 8.0f);
+            g.fillRoundedRectangle(b.translated(0.0f, 2.0f), 10.0f);
         }
         g.setColour(fill);
-        g.fillRoundedRectangle(b, 8.0f);
+        g.fillRoundedRectangle(b, 10.0f);
         g.setColour(border);
-        g.drawRoundedRectangle(b, 8.0f, dragging ? 2.2f : (selected ? 2.0f : 1.0f));
+        g.drawRoundedRectangle(b, 10.0f, dragging ? 2.2f : (selected ? 2.0f : 1.0f));
     }
 
     void mouseDown(const juce::MouseEvent& e) override
     {
         if (auto* lb = findParentComponentOfClass<juce::ListBox>())
             lb->selectRow(row);
+        pointerDownWasLeft = e.mods.isLeftButtonDown();
+        if (! pointerDownWasLeft)
+            return;
         if (isEventFromInteractiveControl(e))
             return;
         dragging = true;
@@ -725,8 +782,24 @@ public:
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        if (! pointerDownWasLeft)
+            return;
+
         if (! dragging)
             return;
+        const auto dragDistance = std::abs(e.getDistanceFromDragStartY());
+        if (dragDistance < 4)
+        {
+            dragging = false;
+            dragOffsetY = 0.0f;
+            targetScale = 1.0f;
+            setAlwaysOnTop(false);
+            startTimerHz(60);
+            if (showMenu)
+                showMenu(row, e.getScreenPosition());
+            repaint();
+            return;
+        }
         auto targetRow = row;
         if (auto* lb = findParentComponentOfClass<juce::ListBox>())
         {
@@ -750,6 +823,7 @@ private:
     int row { -1 };
     bool selected { false };
     bool dragging { false };
+    bool pointerDownWasLeft { false };
     float dragOffsetY { 0.0f };
     float currentScale { 1.0f };
     float targetScale { 1.0f };
@@ -765,6 +839,7 @@ private:
     OpenFn open;
     MixFn setMix;
     ToggleFn toggle;
+    MenuFn showMenu;
 
     bool isEventFromInteractiveControl(const juce::MouseEvent& e) const
     {
@@ -850,6 +925,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 {
     static ModernLookAndFeel modern;
     setLookAndFeel(&modern);
+    setWantsKeyboardFocus(true);
+    setMouseClickGrabsKeyboardFocus(true);
     appLogo = juce::ImageFileFormat::loadFrom(BinaryData::app_png, BinaryData::app_pngSize);
 
     title.setText("fizzle", juce::dontSendNotification);
@@ -857,6 +934,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     titleFont.setTypefaceStyle("SemiBold");
     titleFont.setExtraKerningFactor(0.042f);
     title.setFont(titleFont);
+    title.setColour(juce::Label::textColourId, kUiText);
     addAndMakeVisible(title);
     title.setVisible(true);
 
@@ -874,8 +952,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     updatesLabel.setText("Updates", juce::dontSendNotification);
     updatesLinksLabel.setText("Quick links", juce::dontSendNotification);
     updatesLinksLabel.setColour(juce::Label::textColourId, kUiTextMuted);
-    startupLabel.setText("Startup", juce::dontSendNotification);
-    startupHintLabel.setText("Startup controls and app-follow behavior.", juce::dontSendNotification);
+    startupLabel.setText("Behavior", juce::dontSendNotification);
+    startupHintLabel.setText("Listen routing, plugin search folders, and startup controls.", juce::dontSendNotification);
     startupHintLabel.setColour(juce::Label::textColourId, kUiTextMuted);
     startupHintLabel.setJustificationType(juce::Justification::topLeft);
     appearanceModeLabel.setText("Mode", juce::dontSendNotification);
@@ -992,6 +1070,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsNavAppearanceButton.setClickingTogglesState(true);
     settingsNavUpdatesButton.setClickingTogglesState(true);
     settingsNavStartupButton.setClickingTogglesState(true);
+    settingsNavStartupButton.setButtonText("Behavior");
     settingsNavAutoEnableButton.setToggleState(true, juce::dontSendNotification);
     settingsNavAppearanceButton.setToggleState(false, juce::dontSendNotification);
     settingsNavUpdatesButton.setToggleState(false, juce::dontSendNotification);
@@ -1001,6 +1080,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     startWithWindowsToggle.setButtonText("Start with Windows");
     startMinimizedToggle.setButtonText("Start minimized to tray");
     followAutoEnableWindowToggle.setButtonText("Open/close window with Program Auto-Enable");
+    behaviorListenDeviceLabel.setText("Listen Output Device", juce::dontSendNotification);
+    behaviorVstFoldersLabel.setText("VST Search Folders", juce::dontSendNotification);
     lightModeToggle.setButtonText("Light mode");
 
     appearanceThemeBox.addItem("Aqua", 1);
@@ -1010,6 +1091,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     appearanceSizeBox.addItem("Small (Compact)", 1);
     appearanceSizeBox.addItem("Normal", 2);
     appearanceSizeBox.addItem("Large", 3);
+    behaviorListenDeviceBox.setTextWhenNothingSelected("Select device...");
+    behaviorListenDeviceBox.addListener(this);
     appSearchEditor.setTextToShowWhenEmpty("Type to search programs...", juce::Colour(0xff9aa7b6));
     appSearchEditor.onTextChange = [this]
     {
@@ -1045,6 +1128,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     appearanceThemeBox.addListener(this);
     appearanceBackgroundBox.addListener(this);
     appearanceSizeBox.addListener(this);
+    behaviorAddVstFolderButton.addListener(this);
+    behaviorRemoveVstFolderButton.addListener(this);
 
     programListModel = std::make_unique<ProgramListModel>();
     programListModel->rowCount = [this]() { return static_cast<int>(filteredProgramIndices.size()); };
@@ -1115,9 +1200,43 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     enabledProgramsListBox.setOutlineThickness(1);
     enabledProgramsListBox.setColour(juce::ListBox::outlineColourId, kUiAccent.withAlpha(0.25f));
 
+    vstSearchPathListModel = std::make_unique<ProgramListModel>();
+    vstSearchPathListModel->rowCount = [this]() { return cachedSettings.vstSearchPaths.size(); };
+    vstSearchPathListModel->paintRow = [this](int row, juce::Graphics& g, int width, int height, bool selected)
+    {
+        if (row < 0 || row >= cachedSettings.vstSearchPaths.size())
+            return;
+        auto r = juce::Rectangle<int>(0, 0, width, height).reduced(2, 1);
+        g.setColour(selected ? kUiPanel.withAlpha(0.95f) : kUiPanelSoft.withAlpha(0.8f));
+        g.fillRoundedRectangle(r.toFloat(), 6.0f);
+        if (selected)
+        {
+            g.setColour(kUiAccentSoft);
+            g.drawRoundedRectangle(r.toFloat(), 6.0f, 1.2f);
+        }
+        g.setColour(kUiText);
+        juce::Font rowFont(juce::FontOptions(12.8f));
+        rowFont.setExtraKerningFactor(0.01f);
+        g.setFont(rowFont);
+        g.drawText(cachedSettings.vstSearchPaths[row], r.withTrimmedLeft(10), juce::Justification::centredLeft, true);
+    };
+    vstSearchPathListModel->rowClicked = [this](int row)
+    {
+        behaviorVstFoldersListBox.selectRow(row);
+    };
+    behaviorVstFoldersListBox.setModel(vstSearchPathListModel.get());
+    behaviorVstFoldersListBox.setRowHeight(24);
+    behaviorVstFoldersListBox.setColour(juce::ListBox::backgroundColourId, kUiPanel.withAlpha(0.7f));
+    behaviorVstFoldersListBox.setOutlineThickness(1);
+    behaviorVstFoldersListBox.setColour(juce::ListBox::outlineColourId, kUiAccent.withAlpha(0.25f));
+
     settingsPanel = std::make_unique<SettingsOverlay>([this]
     {
         setSettingsPanelVisible(false);
+    },
+    [this](int deltaPixels)
+    {
+        scrollSettingsContent(deltaPixels);
     });
     settingsPanel->addAndMakeVisible(settingsNavLabel);
     settingsPanel->addAndMakeVisible(settingsNavAutoEnableButton);
@@ -1153,6 +1272,12 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(updatesWebsiteButton);
     settingsPanel->addAndMakeVisible(updateStatusLabel);
     settingsPanel->addAndMakeVisible(startupLabel);
+    settingsPanel->addAndMakeVisible(behaviorListenDeviceLabel);
+    settingsPanel->addAndMakeVisible(behaviorListenDeviceBox);
+    settingsPanel->addAndMakeVisible(behaviorVstFoldersLabel);
+    settingsPanel->addAndMakeVisible(behaviorVstFoldersListBox);
+    settingsPanel->addAndMakeVisible(behaviorAddVstFolderButton);
+    settingsPanel->addAndMakeVisible(behaviorRemoveVstFolderButton);
     settingsPanel->addAndMakeVisible(startWithWindowsToggle);
     settingsPanel->addAndMakeVisible(startMinimizedToggle);
     settingsPanel->addAndMakeVisible(followAutoEnableWindowToggle);
@@ -1178,6 +1303,11 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     outputGain.setRange(-24.0, 24.0, 0.1);
     outputGain.setSkewFactorFromMidPoint(0.0);
     outputGain.setDoubleClickReturnValue(true, 0.0);
+    outputGain.setColour(juce::Slider::trackColourId, kUiAccent.withAlpha(0.72f));
+    outputGain.setColour(juce::Slider::thumbColourId, kUiAccentSoft);
+    outputGain.setColour(juce::Slider::textBoxTextColourId, kUiText);
+    outputGain.setColour(juce::Slider::textBoxBackgroundColourId, kUiPanelSoft.withAlpha(0.92f));
+    outputGain.setColour(juce::Slider::textBoxOutlineColourId, kUiAccent.withAlpha(0.30f));
     outputGain.onValueChange = [this]
     {
         params.outputGainDb.store(static_cast<float>(outputGain.getValue()));
@@ -1202,6 +1332,11 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     if (persistedLastPreset.isNotEmpty())
         cachedSettings.lastPresetName = persistedLastPreset;
     engine.getVstHost().importScannedPaths(cachedSettings.scannedVstPaths);
+    if (cachedSettings.vstSearchPaths.isEmpty())
+    {
+        for (const auto& folder : getDefaultVst3Folders())
+            cachedSettings.vstSearchPaths.addIfNotAlreadyThere(folder.getFullPathName());
+    }
     autoEnableToggle.setToggleState(cachedSettings.autoEnableByApp, juce::dontSendNotification);
     autoDownloadUpdatesToggle.setToggleState(cachedSettings.autoInstallUpdates, juce::dontSendNotification);
     lightModeToggle.setToggleState(cachedSettings.lightMode, juce::dontSendNotification);
@@ -1223,6 +1358,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
         appPathEditor.setText(cachedSettings.autoEnableProcessPath, juce::dontSendNotification);
 
     loadDeviceLists();
+    refreshListenOutputDevices();
+    refreshVstSearchPathList();
     refreshKnownPlugins();
     refreshPresets();
     if (cachedSettings.lastPresetName.isNotEmpty() && cachedSettings.lastPresetName != "Default")
@@ -1239,20 +1376,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
         {
             if (safeThis == nullptr)
                 return;
-
-            const juce::String guide =
-                "Welcome to Fizzle!\n\n"
-                "Quick setup:\n"
-                "1) Select your microphone in Input Mic.\n"
-                "2) Select Fizzle Mic (VB-Cable) in Fizzle Mic Output.\n"
-                "3) Turn Effects On.\n"
-                "4) Pick a VST3 from the detected list to add it.\n"
-                "5) Use Listen if you want local monitoring.\n\n"
-                "Tip: Save a preset after your first good setup.";
-
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                   "First Launch Guide",
-                                                   guide);
+            safeThis->showFirstLaunchGuide();
         });
     }
 
@@ -1266,7 +1390,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
         });
     }
 
-    startTimerHz(20);
+    uiTimerHz = 30;
+    startTimerHz(uiTimerHz);
 }
 
 void MainComponent::onWindowVisible()
@@ -1356,7 +1481,18 @@ juce::Array<juce::File> MainComponent::getDefaultVst3Folders() const
 void MainComponent::autoScanVstFolders()
 {
     int total = 0;
-    for (const auto& folder : getDefaultVst3Folders())
+    juce::Array<juce::File> folders;
+    if (cachedSettings.vstSearchPaths.isEmpty())
+    {
+        folders = getDefaultVst3Folders();
+    }
+    else
+    {
+        for (const auto& p : cachedSettings.vstSearchPaths)
+            folders.add(juce::File(p));
+    }
+
+    for (const auto& folder : folders)
     {
         if (! folder.isDirectory())
             continue;
@@ -1506,6 +1642,62 @@ void MainComponent::refreshEnabledProgramsList()
     enabledProgramsListBox.selectRow(selectedEnabledProgramRow);
     enabledProgramsListBox.scrollToEnsureRowIsOnscreen(selectedEnabledProgramRow);
     appEnableLabel.setText("Program Auto-Enable (" + juce::String(cachedSettings.autoEnableProcessNames.size()) + " selected)", juce::dontSendNotification);
+}
+
+void MainComponent::refreshListenOutputDevices()
+{
+    const juce::ScopedValueSetter<bool> svs(suppressControlCallbacks, true);
+    behaviorListenDeviceBox.clear();
+    auto* currentType = engine.getDeviceManager().getCurrentDeviceTypeObject();
+    if (currentType == nullptr)
+        return;
+
+    const auto outputNames = currentType->getDeviceNames(false);
+    int id = 1;
+    for (const auto& name : outputNames)
+    {
+        behaviorListenDeviceBox.addItem(name, id++);
+    }
+
+    juce::String selected = cachedSettings.listenMonitorDeviceName;
+    if (selected.isEmpty())
+        selected = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
+
+    if (selected.isNotEmpty())
+    {
+        const auto idx = outputNames.indexOf(selected);
+        if (idx >= 0)
+            behaviorListenDeviceBox.setSelectedId(idx + 1, juce::dontSendNotification);
+    }
+}
+
+void MainComponent::refreshVstSearchPathList()
+{
+    if (vstSearchPathListModel != nullptr)
+    {
+        behaviorVstFoldersListBox.updateContent();
+        behaviorVstFoldersListBox.repaint();
+    }
+}
+
+void MainComponent::addVstSearchPath(const juce::String& path)
+{
+    const auto clean = path.trim();
+    if (clean.isEmpty())
+        return;
+    cachedSettings.vstSearchPaths.addIfNotAlreadyThere(clean);
+    saveCachedSettings();
+    refreshVstSearchPathList();
+}
+
+void MainComponent::removeSelectedVstSearchPath()
+{
+    const auto selected = behaviorVstFoldersListBox.getSelectedRow();
+    if (! juce::isPositiveAndBelow(selected, cachedSettings.vstSearchPaths.size()))
+        return;
+    cachedSettings.vstSearchPaths.remove(selected);
+    saveCachedSettings();
+    refreshVstSearchPathList();
 }
 
 void MainComponent::selectProgramByRow(int row)
@@ -1689,8 +1881,12 @@ void MainComponent::setSettingsPanelVisible(bool visible)
     settingsPanelTargetVisible = visible;
     if (visible)
     {
+        settingsScrollY = 0;
+        settingsScrollMax = 0;
         refreshRunningApps();
         refreshProgramsList();
+        refreshListenOutputDevices();
+        refreshVstSearchPathList();
         updateSettingsTabVisibility();
         settingsPanel->setVisible(true);
         settingsPanel->toFront(true);
@@ -1754,6 +1950,12 @@ void MainComponent::updateSettingsTabVisibility()
     }
 
     for (auto* c : { static_cast<juce::Component*>(&startupLabel),
+                     static_cast<juce::Component*>(&behaviorListenDeviceLabel),
+                     static_cast<juce::Component*>(&behaviorListenDeviceBox),
+                     static_cast<juce::Component*>(&behaviorVstFoldersLabel),
+                     static_cast<juce::Component*>(&behaviorVstFoldersListBox),
+                     static_cast<juce::Component*>(&behaviorAddVstFolderButton),
+                     static_cast<juce::Component*>(&behaviorRemoveVstFolderButton),
                      static_cast<juce::Component*>(&startWithWindowsToggle),
                      static_cast<juce::Component*>(&startMinimizedToggle),
                      static_cast<juce::Component*>(&followAutoEnableWindowToggle),
@@ -1767,6 +1969,7 @@ void MainComponent::updateSettingsTabVisibility()
 void MainComponent::setActiveSettingsTab(int tab)
 {
     activeSettingsTab = juce::jlimit(0, 3, tab);
+    settingsScrollY = 0;
     settingsNavAutoEnableButton.setToggleState(activeSettingsTab == 0, juce::dontSendNotification);
     settingsNavAppearanceButton.setToggleState(activeSettingsTab == 1, juce::dontSendNotification);
     settingsNavUpdatesButton.setToggleState(activeSettingsTab == 2, juce::dontSendNotification);
@@ -1775,12 +1978,68 @@ void MainComponent::setActiveSettingsTab(int tab)
     resized();
 }
 
+void MainComponent::scrollSettingsContent(int deltaPixels)
+{
+    if (! settingsPanelTargetVisible || settingsScrollMax <= 0)
+        return;
+
+    const auto newY = juce::jlimit(0, settingsScrollMax, settingsScrollY + deltaPixels);
+    if (newY == settingsScrollY)
+        return;
+
+    settingsScrollY = newY;
+    resized();
+    repaint();
+}
+
 void MainComponent::triggerButtonFlash(juce::Button* button)
 {
     if (button == &savePresetButton)
         savePresetFlashAlpha = 1.0f;
     else if (button == &aboutButton)
         aboutFlashAlpha = 1.0f;
+}
+
+void MainComponent::showFirstLaunchGuide()
+{
+    triggerLogoFizzAnimation();
+
+    const juce::String guide =
+        "Welcome to Fizzle!\n\n"
+        "Quick setup:\n"
+        "1) Select your microphone in Input Mic.\n"
+        "2) Select Fizzle Mic (VB-Cable) in Fizzle Mic Output.\n"
+        "3) Turn Effects On.\n"
+        "4) Pick a VST3 from the detected list to add it.\n"
+        "5) Use Listen if you want local monitoring.\n\n"
+        "Tip: Save a preset after your first good setup.";
+
+    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+                                           "First Launch Guide",
+                                           guide);
+}
+
+void MainComponent::triggerLogoFizzAnimation()
+{
+    logoFizzBubbles.clear();
+    logoFizzActive = true;
+    logoFizzTicks = 180;
+
+    juce::Random random(static_cast<juce::int64>(juce::Time::getMillisecondCounterHiRes()));
+    const auto bounds = getLocalBounds().toFloat().reduced(16.0f, 12.0f);
+    const auto startY = bounds.getBottom() - 16.0f;
+    const int bubbleCount = 34;
+    for (int i = 0; i < bubbleCount; ++i)
+    {
+        FizzBubble b;
+        b.pos = { bounds.getX() + random.nextFloat() * bounds.getWidth(),
+                  startY + random.nextFloat() * 90.0f };
+        b.radius = (3.0f + random.nextFloat() * 10.0f) * kUiControlScale;
+        b.speed = (0.8f + random.nextFloat() * 2.1f) * kUiControlScale;
+        b.drift = (random.nextFloat() - 0.5f) * 0.9f;
+        b.alpha = 0.30f + random.nextFloat() * 0.42f;
+        logoFizzBubbles.push_back(b);
+    }
 }
 
 void MainComponent::applyWindowsStartupSetting()
@@ -1813,11 +2072,27 @@ void MainComponent::toggleWindowMaximize()
 void MainComponent::mouseDown(const juce::MouseEvent& e)
 {
     draggingWindow = false;
+    draggingResizeGrip = false;
+
+    if (e.mods.isLeftButtonDown() && resizeGripBounds.contains(e.getPosition()))
+    {
+        if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+        {
+            draggingResizeGrip = true;
+            resizeDragStartScreen = e.getScreenPosition();
+            resizeStartBounds = window->getBounds();
+            return;
+        }
+    }
+
     if (! headerBounds.contains(e.getPosition()))
         return;
 
     if (e.originalComponent == &windowMinButton || e.originalComponent == &windowMaxButton || e.originalComponent == &windowCloseButton)
         return;
+
+    if (headerLogoBounds.contains(e.getPosition()))
+        triggerLogoFizzAnimation();
 
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
     {
@@ -1841,6 +2116,19 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
 
 void MainComponent::mouseDrag(const juce::MouseEvent& e)
 {
+    if (draggingResizeGrip)
+    {
+        if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+        {
+            auto delta = e.getScreenPosition() - resizeDragStartScreen;
+            auto newBounds = resizeStartBounds;
+            newBounds.setWidth(juce::jmax(420, resizeStartBounds.getWidth() + delta.x));
+            newBounds.setHeight(juce::jmax(320, resizeStartBounds.getHeight() + delta.y));
+            window->setBoundsConstrained(newBounds);
+        }
+        return;
+    }
+
     if (! draggingWindow)
         return;
 
@@ -1851,12 +2139,24 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
 void MainComponent::mouseUp(const juce::MouseEvent&)
 {
     draggingWindow = false;
+    draggingResizeGrip = false;
 }
 
 void MainComponent::mouseDoubleClick(const juce::MouseEvent& e)
 {
     if (headerBounds.contains(e.getPosition()))
         toggleWindowMaximize();
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress('z', juce::ModifierKeys::commandModifier, 0)
+        || key == juce::KeyPress('z', juce::ModifierKeys::ctrlModifier, 0))
+    {
+        restoreLastRemovedPlugin();
+        return true;
+    }
+    return false;
 }
 
 void MainComponent::refreshKnownPlugins()
@@ -1915,6 +2215,7 @@ void MainComponent::loadDeviceLists()
         if (outputIndex >= 0)
             outputBox.setSelectedId(outputIndex + 1, juce::dontSendNotification);
     }
+    refreshListenOutputDevices();
 }
 
 void MainComponent::refreshPresets()
@@ -2238,7 +2539,7 @@ void MainComponent::applyThemePalette()
         kUiMint = lightMode ? juce::Colour(0xff66aac8) : juce::Colour(0xff9af7d8);
     }
 
-    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.86f : 0.80f) : 1.0f;
+    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.62f : 0.56f) : 1.0f;
 
     theme::background = kUiBg;
     theme::panel = kUiPanel;
@@ -2254,14 +2555,28 @@ void MainComponent::applyThemePalette()
     setColour(juce::ComboBox::outlineColourId, kUiAccent.withAlpha(0.28f));
     setColour(juce::ComboBox::textColourId, kUiText);
     setColour(juce::TextButton::textColourOffId, kUiText);
+    setColour(juce::TextButton::textColourOnId, kUiText);
     setColour(juce::Label::textColourId, kUiText);
     setColour(juce::ToggleButton::textColourId, kUiText);
+    setColour(juce::Slider::trackColourId, kUiAccent.withAlpha(0.72f));
+    setColour(juce::Slider::thumbColourId, kUiAccentSoft);
+    setColour(juce::Slider::textBoxTextColourId, kUiText);
+    setColour(juce::Slider::textBoxBackgroundColourId, kUiPanelSoft.withAlpha(0.92f));
+    setColour(juce::Slider::textBoxOutlineColourId, kUiAccent.withAlpha(0.30f));
+    setColour(juce::Slider::textBoxHighlightColourId, kUiAccent.withAlpha(0.20f));
     setColour(juce::TextEditor::backgroundColourId, kUiPanel.withAlpha(0.72f));
     setColour(juce::TextEditor::outlineColourId, kUiAccent.withAlpha(0.24f));
     setColour(juce::TextEditor::textColourId, kUiText);
     setColour(juce::AlertWindow::backgroundColourId, kUiPanel);
     setColour(juce::AlertWindow::outlineColourId, kUiAccent.withAlpha(0.35f));
     setColour(juce::AlertWindow::textColourId, kUiText);
+    setColour(juce::PopupMenu::backgroundColourId, kUiPanel);
+    setColour(juce::PopupMenu::textColourId, kUiText);
+    setColour(juce::PopupMenu::highlightedBackgroundColourId, kUiAccent.withAlpha(0.22f));
+    setColour(juce::PopupMenu::highlightedTextColourId, lightMode ? juce::Colour(0xff102038) : juce::Colours::white);
+
+    if (auto* lf = dynamic_cast<ModernLookAndFeel*>(&getLookAndFeel()))
+        lf->refreshThemeColours();
 
     for (auto* l : { static_cast<juce::Label*>(&inputLabel),
                      static_cast<juce::Label*>(&outputLabel),
@@ -2286,7 +2601,10 @@ void MainComponent::applyThemePalette()
                      static_cast<juce::Label*>(&appearanceThemeLabel),
                      static_cast<juce::Label*>(&appearanceBackgroundLabel),
                      static_cast<juce::Label*>(&appearanceSizeLabel),
+                     static_cast<juce::Label*>(&behaviorListenDeviceLabel),
+                     static_cast<juce::Label*>(&behaviorVstFoldersLabel),
                      static_cast<juce::Label*>(&dragHintLabel),
+                     static_cast<juce::Label*>(&title),
                      static_cast<juce::Label*>(&outputGainLabel),
                      static_cast<juce::Label*>(&versionLabel) })
     {
@@ -2309,10 +2627,83 @@ void MainComponent::applyThemePalette()
         editor->setColour(juce::TextEditor::highlightColourId, kUiAccent.withAlpha(0.24f));
     }
 
+    outputGain.setColour(juce::Slider::trackColourId, kUiAccent.withAlpha(0.78f));
+    outputGain.setColour(juce::Slider::thumbColourId, kUiAccentSoft);
+    outputGain.setColour(juce::Slider::textBoxTextColourId, kUiText);
+    outputGain.setColour(juce::Slider::textBoxBackgroundColourId, (lightMode ? kUiPanel : kUiPanelSoft).withAlpha(lightMode ? 0.86f : 0.92f));
+    outputGain.setColour(juce::Slider::textBoxOutlineColourId, kUiAccent.withAlpha(0.34f));
+    for (auto* cb : { static_cast<juce::ComboBox*>(&inputBox),
+                      static_cast<juce::ComboBox*>(&outputBox),
+                      static_cast<juce::ComboBox*>(&bufferBox),
+                      static_cast<juce::ComboBox*>(&presetBox),
+                      static_cast<juce::ComboBox*>(&vstAvailableBox),
+                      static_cast<juce::ComboBox*>(&appearanceThemeBox),
+                      static_cast<juce::ComboBox*>(&appearanceBackgroundBox),
+                      static_cast<juce::ComboBox*>(&appearanceSizeBox),
+                      static_cast<juce::ComboBox*>(&behaviorListenDeviceBox) })
+    {
+        if (cb == nullptr)
+            continue;
+        cb->setColour(juce::ComboBox::textColourId, kUiText);
+        cb->setColour(juce::Label::textColourId, kUiText);
+        cb->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+        cb->setColour(juce::ComboBox::backgroundColourId, kUiPanelSoft.withAlpha(lightMode ? 0.9f : 0.85f));
+        cb->setColour(juce::ComboBox::outlineColourId, kUiAccent.withAlpha(0.28f));
+        cb->sendLookAndFeelChange();
+        cb->repaint();
+    }
+
+    for (auto* b : { static_cast<juce::TextButton*>(&savePresetButton),
+                     static_cast<juce::TextButton*>(&deletePresetButton),
+                     static_cast<juce::TextButton*>(&rescanVstButton),
+                     static_cast<juce::TextButton*>(&autoScanVstButton),
+                     static_cast<juce::TextButton*>(&removeVstButton),
+                     static_cast<juce::TextButton*>(&routeSpeakersButton),
+                     static_cast<juce::TextButton*>(&restartButton),
+                     static_cast<juce::TextButton*>(&aboutButton),
+                     static_cast<juce::TextButton*>(&settingsButton),
+                     static_cast<juce::TextButton*>(&refreshAppsButton),
+                     static_cast<juce::TextButton*>(&browseAppPathButton),
+                     static_cast<juce::TextButton*>(&removeProgramButton),
+                     static_cast<juce::TextButton*>(&behaviorAddVstFolderButton),
+                     static_cast<juce::TextButton*>(&behaviorRemoveVstFolderButton),
+                     static_cast<juce::TextButton*>(&closeSettingsButton),
+                     static_cast<juce::TextButton*>(&checkUpdatesButton),
+                     static_cast<juce::TextButton*>(&updatesGithubButton),
+                     static_cast<juce::TextButton*>(&updatesWebsiteButton),
+                     static_cast<juce::TextButton*>(&windowMinButton),
+                     static_cast<juce::TextButton*>(&windowMaxButton),
+                     static_cast<juce::TextButton*>(&windowCloseButton),
+                     static_cast<juce::TextButton*>(&outputGainResetButton) })
+    {
+        if (b != nullptr)
+        {
+            b->setColour(juce::TextButton::textColourOffId, kUiText);
+            b->setColour(juce::TextButton::textColourOnId, kUiText);
+        }
+    }
+
+    for (auto* t : { static_cast<juce::ToggleButton*>(&toneButton),
+                     static_cast<juce::ToggleButton*>(&effectsToggle),
+                     static_cast<juce::ToggleButton*>(&autoEnableToggle),
+                     static_cast<juce::ToggleButton*>(&autoDownloadUpdatesToggle),
+                     static_cast<juce::ToggleButton*>(&startWithWindowsToggle),
+                     static_cast<juce::ToggleButton*>(&startMinimizedToggle),
+                     static_cast<juce::ToggleButton*>(&followAutoEnableWindowToggle),
+                     static_cast<juce::ToggleButton*>(&lightModeToggle) })
+    {
+        if (t != nullptr)
+            t->setColour(juce::ToggleButton::textColourId, kUiText);
+    }
+
     diagnostics.applyStyle(kUiControlScale);
+    appListBox.repaint();
+    enabledProgramsListBox.repaint();
+    behaviorVstFoldersListBox.repaint();
     if (auto* window = findParentComponentOfClass<MainWindow>())
         window->setTransparentBackgroundEnabled(cachedSettings.transparentBackground);
     styleTransitionAlpha = 0.42f;
+    sendLookAndFeelChange();
     repaint();
 }
 
@@ -2372,6 +2763,8 @@ void MainComponent::applyUiDensity()
     appearanceThemeLabel.setFont(sectionLabelFont);
     appearanceBackgroundLabel.setFont(sectionLabelFont);
     appearanceSizeLabel.setFont(sectionLabelFont);
+    behaviorListenDeviceLabel.setFont(sectionLabelFont);
+    behaviorVstFoldersLabel.setFont(sectionLabelFont);
 
     juce::Font versionFont(juce::FontOptions(11.0f * uiScale));
     versionFont.setExtraKerningFactor(0.07f);
@@ -2380,6 +2773,7 @@ void MainComponent::applyUiDensity()
     vstChainList.setRowHeight(juce::jmax(44, juce::roundToInt(56.0f * uiScale)));
     appListBox.setRowHeight(juce::jmax(22, juce::roundToInt(24.0f * uiScale)));
     enabledProgramsListBox.setRowHeight(juce::jmax(22, juce::roundToInt(24.0f * uiScale)));
+    behaviorVstFoldersListBox.setRowHeight(juce::jmax(22, juce::roundToInt(24.0f * uiScale)));
     diagnostics.applyStyle(kUiControlScale);
 
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
@@ -2705,6 +3099,121 @@ void MainComponent::setRowMix(int row, float mix)
     engine.getVstHost().setMix(row, mix);
 }
 
+void MainComponent::setRowEnabled(int row, bool enabled)
+{
+    if (! juce::isPositiveAndBelow(row, getNumRows()))
+        return;
+    engine.getVstHost().setEnabled(row, enabled);
+    refreshPluginChainUi();
+}
+
+void MainComponent::capturePluginSnapshotForUndo(int index)
+{
+    lastRemovedPlugin = {};
+    if (! juce::isPositiveAndBelow(index, getNumRows()))
+        return;
+    auto* plugin = engine.getVstHost().getPlugin(index);
+    if (plugin == nullptr || plugin->instance == nullptr)
+        return;
+
+    juce::MemoryBlock block;
+    plugin->instance->getStateInformation(block);
+    lastRemovedPlugin.description = plugin->description;
+    lastRemovedPlugin.base64State = block.toBase64Encoding();
+    lastRemovedPlugin.enabled = plugin->enabled;
+    lastRemovedPlugin.mix = plugin->mix;
+    lastRemovedPlugin.index = index;
+    lastRemovedPlugin.valid = true;
+}
+
+bool MainComponent::removePluginAtIndex(int index, bool captureUndo)
+{
+    if (! juce::isPositiveAndBelow(index, getNumRows()))
+        return false;
+    if (captureUndo)
+        capturePluginSnapshotForUndo(index);
+    closePluginEditorWindow();
+    engine.getVstHost().removePlugin(index);
+    refreshPluginChainUi();
+    const auto newCount = getNumRows();
+    if (newCount > 0)
+        vstChainList.selectRow(juce::jlimit(0, newCount - 1, index));
+    return true;
+}
+
+void MainComponent::restoreLastRemovedPlugin()
+{
+    if (! lastRemovedPlugin.valid)
+        return;
+
+    juce::String error;
+    const auto d = engine.getDiagnostics();
+    const auto sampleRate = d.sampleRate > 0.0 ? d.sampleRate : 48000.0;
+    const auto blockSize = d.bufferSize > 0 ? d.bufferSize : kDefaultBlockSize;
+    if (! engine.getVstHost().addPluginWithState(lastRemovedPlugin.description,
+                                                 sampleRate,
+                                                 blockSize,
+                                                 lastRemovedPlugin.base64State,
+                                                 error))
+    {
+        if (error.isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Undo Remove Failed", error);
+        return;
+    }
+
+    const auto newIndex = getNumRows() - 1;
+    engine.getVstHost().setEnabled(newIndex, lastRemovedPlugin.enabled);
+    engine.getVstHost().setMix(newIndex, lastRemovedPlugin.mix);
+
+    const auto targetIndex = juce::jlimit(0, juce::jmax(0, getNumRows() - 1), lastRemovedPlugin.index);
+    if (targetIndex != newIndex)
+        engine.getVstHost().movePlugin(newIndex, targetIndex);
+
+    refreshPluginChainUi();
+    vstChainList.selectRow(targetIndex);
+    setEffectsHint("Restored removed VST", 50);
+}
+
+void MainComponent::rowQuickActionMenu(int row, juce::Point<int> screenPosition)
+{
+    if (! juce::isPositiveAndBelow(row, getNumRows()))
+        return;
+
+    auto* plugin = engine.getVstHost().getPlugin(row);
+    if (plugin == nullptr)
+        return;
+
+    juce::PopupMenu m;
+    m.addItem(1, plugin->enabled ? "Disable" : "Enable");
+    m.addItem(2, "Solo");
+    m.addItem(3, "Remove");
+
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(juce::Rectangle<int>(screenPosition.x, screenPosition.y, 1, 1)),
+                    [safeThis, row](int result)
+    {
+        if (safeThis == nullptr)
+            return;
+        if (result == 1)
+        {
+            if (auto* p = safeThis->engine.getVstHost().getPlugin(row))
+                safeThis->setRowEnabled(row, ! p->enabled);
+        }
+        else if (result == 2)
+        {
+            const auto chain = safeThis->engine.getVstHost().getChain();
+            for (int i = 0; i < chain.size(); ++i)
+                safeThis->engine.getVstHost().setEnabled(i, i == row);
+            safeThis->refreshPluginChainUi();
+            safeThis->setEffectsHint("Soloed VST", 45);
+        }
+        else if (result == 3)
+        {
+            safeThis->removePluginAtIndex(row, true);
+        }
+    });
+}
+
 void MainComponent::loadPresetByName(const juce::String& name)
 {
     if (auto preset = presetStore.loadPreset(name))
@@ -2810,6 +3319,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     else if (button == &aboutButton)
     {
         triggerButtonFlash(button);
+        juce::Component::SafePointer<MainComponent> safeThis(this);
         auto* aboutPrompt = new juce::AlertWindow("About Fizzle",
                                                   "Fizzle " + juce::String(FIZZLE_VERSION)
                                                     + "\n\nGitHub: " + kGithubRepoUrl
@@ -2817,20 +3327,29 @@ void MainComponent::buttonClicked(juce::Button* button)
                                                   juce::AlertWindow::InfoIcon);
         aboutPrompt->addButton("Open GitHub", 1);
         aboutPrompt->addButton("Open Website", 2);
+        aboutPrompt->addButton("First-time Tips", 3);
         aboutPrompt->addButton("Close", 0);
-        aboutPrompt->enterModalState(true, juce::ModalCallbackFunction::create([](int result)
+        aboutPrompt->enterModalState(true, juce::ModalCallbackFunction::create([safeThis](int result)
         {
+            if (safeThis == nullptr)
+                return;
             if (result == 1)
                 juce::URL(kGithubRepoUrl).launchInDefaultBrowser();
             else if (result == 2)
                 juce::URL(kWebsiteUrl).launchInDefaultBrowser();
+            else if (result == 3)
+                safeThis->showFirstLaunchGuide();
         }), true);
     }
     else if (button == &routeSpeakersButton)
     {
         if (! engine.isListenEnabled())
         {
-            const auto monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
+            auto monitor = cachedSettings.listenMonitorDeviceName.trim();
+            if (monitor.isEmpty())
+                monitor = behaviorListenDeviceBox.getText().trim();
+            if (monitor.isEmpty())
+                monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
             if (monitor.isEmpty())
                 return;
             if (monitor == getSelectedOutputDeviceName())
@@ -2840,6 +3359,8 @@ void MainComponent::buttonClicked(juce::Button* button)
                                                        "Listen output must be different from the Virtual Mic output.");
                 return;
             }
+            cachedSettings.listenMonitorDeviceName = monitor;
+            saveCachedSettings();
             engine.setMonitorOutputDevice(monitor);
             engine.setListenEnabled(true);
             routeSpeakersButton.setButtonText("Listening");
@@ -2865,8 +3386,7 @@ void MainComponent::buttonClicked(juce::Button* button)
         const auto selected = vstChainList.getSelectedRow();
         if (selected >= 0)
         {
-            closePluginEditorWindow();
-            engine.getVstHost().removePlugin(selected);
+            removePluginAtIndex(selected, true);
         }
         refreshPluginChainUi();
     }
@@ -2935,6 +3455,7 @@ void MainComponent::buttonClicked(juce::Button* button)
             const auto folder = chooser.getResult();
             if (! folder.isDirectory())
                 return;
+            addVstSearchPath(folder.getFullPathName());
             engine.getVstHost().scanFolder(folder);
             cachedSettings.scannedVstPaths = engine.getVstHost().getScannedPaths();
             saveCachedSettings();
@@ -2992,6 +3513,22 @@ void MainComponent::buttonClicked(juce::Button* button)
                 return;
             addAutoEnableProgramFromPath(f.getFullPathName());
         });
+    }
+    else if (button == &behaviorAddVstFolderButton)
+    {
+        fileChooser = std::make_unique<juce::FileChooser>("Select VST3 folder");
+        const int chooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
+        fileChooser->launchAsync(chooserFlags, [this](const juce::FileChooser& chooser)
+        {
+            const auto folder = chooser.getResult();
+            if (! folder.isDirectory())
+                return;
+            addVstSearchPath(folder.getFullPathName());
+        });
+    }
+    else if (button == &behaviorRemoveVstFolderButton)
+    {
+        removeSelectedVstSearchPath();
     }
     else if (button == &autoEnableToggle)
     {
@@ -3124,6 +3661,16 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
         saveCachedSettings();
         applyUiDensity();
     }
+    else if (comboBoxThatHasChanged == &behaviorListenDeviceBox)
+    {
+        cachedSettings.listenMonitorDeviceName = behaviorListenDeviceBox.getText().trim();
+        saveCachedSettings();
+        if (engine.isListenEnabled() && cachedSettings.listenMonitorDeviceName.isNotEmpty())
+        {
+            engine.setMonitorOutputDevice(cachedSettings.listenMonitorDeviceName);
+            engine.setListenEnabled(true);
+        }
+    }
     else if (comboBoxThatHasChanged == &presetBox)
     {
         const auto nextPreset = presetBox.getText().trim();
@@ -3200,10 +3747,21 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 
 void MainComponent::timerCallback()
 {
+    auto setTimerRate = [this](bool highFps)
+    {
+        const int desired = highFps ? 60 : 30;
+        if (desired != uiTimerHz)
+        {
+            uiTimerHz = desired;
+            startTimerHz(uiTimerHz);
+        }
+    };
+
     ++uiTickCount;
     uiPulse += draggingWindow ? 0.010f : 0.022f;
     if (draggingWindow)
     {
+        setTimerRate(true);
         repaint(headerBounds.expanded(28, 12));
         return;
     }
@@ -3317,12 +3875,50 @@ void MainComponent::timerCallback()
     if (effectsHintAlpha <= 0.01f && effectsHintTargetAlpha <= 0.01f && effectsHintTicks == 0)
         effectsHintLabel.setText({}, juce::dontSendNotification);
 
+    if (logoFizzActive)
+    {
+        for (auto& b : logoFizzBubbles)
+        {
+            b.pos.y -= b.speed;
+            b.pos.x += std::sin((uiPulse * 1.6f) + (b.pos.y * 0.014f)) * b.drift;
+            b.alpha -= 0.0035f;
+        }
+        logoFizzBubbles.erase(std::remove_if(logoFizzBubbles.begin(), logoFizzBubbles.end(),
+                                             [this](const FizzBubble& b)
+                                             {
+                                                 return b.alpha <= 0.0f || b.pos.y < -24.0f;
+                                             }),
+                              logoFizzBubbles.end());
+
+        if (logoFizzTicks > 0)
+        {
+            --logoFizzTicks;
+            juce::Random random(static_cast<juce::int64>(juce::Time::getMillisecondCounterHiRes()));
+            const auto bounds = getLocalBounds().toFloat().reduced(16.0f, 12.0f);
+            for (int i = 0; i < 2; ++i)
+            {
+                FizzBubble b;
+                b.pos = { bounds.getX() + random.nextFloat() * bounds.getWidth(),
+                          bounds.getBottom() + random.nextFloat() * 12.0f };
+                b.radius = (2.4f + random.nextFloat() * 8.5f) * kUiControlScale;
+                b.speed = (0.75f + random.nextFloat() * 2.2f) * kUiControlScale;
+                b.drift = (random.nextFloat() - 0.5f) * 0.8f;
+                b.alpha = 0.24f + random.nextFloat() * 0.40f;
+                logoFizzBubbles.push_back(b);
+            }
+        }
+        else if (logoFizzBubbles.empty())
+        {
+            logoFizzActive = false;
+        }
+    }
+
     bool settingsAlphaChanged = false;
     if (settingsPanel != nullptr)
     {
         const auto target = settingsPanelTargetVisible ? 1.0f : 0.0f;
         const auto before = settingsPanelAlpha;
-        settingsPanelAlpha += (target - settingsPanelAlpha) * 0.55f;
+        settingsPanelAlpha += (target - settingsPanelAlpha) * 0.78f;
         if (std::abs(settingsPanelAlpha - target) < 0.01f)
             settingsPanelAlpha = target;
         settingsAlphaChanged = std::abs(settingsPanelAlpha - before) > 0.001f;
@@ -3396,6 +3992,17 @@ void MainComponent::timerCallback()
     if (settingsAlphaChanged && settingsPanel != nullptr && settingsPanel->isVisible())
         settingsPanel->repaint();
 
+    const bool highFpsNeeded = draggingResizeGrip
+                            || logoFizzActive
+                            || restartOverlayBusy
+                            || restartOverlayAlpha > 0.02f
+                            || settingsPanelTargetVisible
+                            || settingsPanelAlpha > 0.02f
+                            || styleTransitionAlpha > 0.02f
+                            || savePresetFlashAlpha > 0.02f
+                            || aboutFlashAlpha > 0.02f;
+    setTimerRate(highFpsNeeded);
+
     repaint(dirty);
 }
 
@@ -3422,9 +4029,9 @@ juce::Component* MainComponent::refreshComponentForRow(int rowNumber, bool isRow
             [this](int r)
             {
                 if (auto* p = engine.getVstHost().getPlugin(r))
-                    engine.getVstHost().setEnabled(r, ! p->enabled);
-                refreshPluginChainUi();
-            });
+                    setRowEnabled(r, ! p->enabled);
+            },
+            [this](int r, juce::Point<int> pt) { rowQuickActionMenu(r, pt); });
     }
 
     if (auto* plugin = engine.getVstHost().getPlugin(rowNumber))
@@ -3435,6 +4042,7 @@ juce::Component* MainComponent::refreshComponentForRow(int rowNumber, bool isRow
 
 void MainComponent::paint(juce::Graphics& g)
 {
+    g.fillAll(juce::Colours::transparentBlack);
     const bool transparentMode = cachedSettings.transparentBackground;
     auto shell = getLocalBounds().toFloat().reduced(6.0f, 2.0f);
     constexpr float shellRadius = 25.0f;
@@ -3450,15 +4058,27 @@ void MainComponent::paint(juce::Graphics& g)
     auto shellPath = makePanelPath(shell, shellRadius);
     g.reduceClipRegion(shellPath);
 
-    juce::ColourGradient bg(kUiBg.brighter(0.05f), shell.getX(), shell.getY(),
-                            kUiBg.darker(0.14f), shell.getX(), shell.getBottom(), false);
+    const bool lowCostPass = draggingWindow || draggingResizeGrip;
+    const bool lightMode = cachedSettings.lightMode;
+    const float shellBaseAlpha = transparentMode ? (lightMode ? 0.22f : 0.18f) : 1.0f;
+    const auto bgTop = transparentMode ? kUiBg.brighter(lightMode ? 0.05f : 0.02f) : kUiBg.brighter(0.05f);
+    const auto bgBottom = transparentMode ? kUiBg.darker(lightMode ? 0.10f : 0.12f) : kUiBg.darker(0.14f);
+    juce::ColourGradient bg(bgTop.withAlpha(shellBaseAlpha * kUiBackgroundAlphaScale),
+                            shell.getX(), shell.getY(),
+                            bgBottom.withAlpha((shellBaseAlpha * 0.96f) * kUiBackgroundAlphaScale),
+                            shell.getX(), shell.getBottom(), false);
     g.setGradientFill(bg);
-    g.fillRect(shell.toNearestInt());
-    g.setOpacity(kUiBackgroundAlphaScale);
     g.fillPath(shellPath);
-    g.setOpacity(1.0f);
-    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, transparentMode ? 0.012f : 0.022f);
-    g.fillPath(shellPath);
+    if (transparentMode)
+    {
+        g.setColour(juce::Colours::black.withAlpha(lightMode ? 0.06f : 0.05f));
+        g.fillPath(shellPath);
+    }
+    if (! lowCostPass)
+    {
+        g.setTiledImageFill(getDitherNoiseTile(), 0, 0, transparentMode ? 0.018f : 0.028f);
+        g.fillPath(shellPath);
+    }
 
     auto outer = shell.expanded(2.0f, 1.6f);
     g.setColour(kUiAccent.withAlpha(transparentMode ? 0.085f : 0.065f));
@@ -3467,21 +4087,24 @@ void MainComponent::paint(juce::Graphics& g)
     g.strokePath(makePanelPath(shell.expanded(0.9f, 0.8f), shellRadius + 0.8f), juce::PathStrokeType(transparentMode ? 1.05f : 0.9f));
 
     auto card = shell.reduced(2.0f, 1.0f);
-    const auto cardTopAlpha = transparentMode ? 0.56f : 0.90f;
-    const auto cardBottomAlpha = transparentMode ? 0.68f : 0.96f;
+    const auto cardTopAlpha = transparentMode ? (lightMode ? 0.13f : 0.11f) : 0.90f;
+    const auto cardBottomAlpha = transparentMode ? (lightMode ? 0.18f : 0.15f) : 0.96f;
     juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(cardTopAlpha * kUiBackgroundAlphaScale), card.getX(), card.getY(),
                                   kUiPanel.withAlpha(cardBottomAlpha * kUiBackgroundAlphaScale), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
     g.fillPath(makePanelPath(card, 21.0f));
-    g.setTiledImageFill(getDitherNoiseTile(), 0, 0, transparentMode ? 0.010f : 0.014f);
-    g.fillPath(makePanelPath(card, 21.0f));
+    if (! lowCostPass)
+    {
+        g.setTiledImageFill(getDitherNoiseTile(), 0, 0, transparentMode ? 0.014f : 0.020f);
+        g.fillPath(makePanelPath(card, 21.0f));
 
-    juce::ColourGradient gloss(juce::Colours::white.withAlpha(transparentMode ? 0.12f : 0.08f),
-                               card.getX(), card.getY(),
-                               juce::Colours::white.withAlpha(0.0f),
-                               card.getX(), card.getY() + card.getHeight() * 0.38f, false);
-    g.setGradientFill(gloss);
-    g.fillRoundedRectangle(card.removeFromTop(card.getHeight() * 0.46f), 21.0f);
+        juce::ColourGradient gloss(juce::Colours::white.withAlpha(transparentMode ? 0.12f : 0.08f),
+                                   card.getX(), card.getY(),
+                                   juce::Colours::white.withAlpha(0.0f),
+                                   card.getX(), card.getY() + card.getHeight() * 0.38f, false);
+        g.setGradientFill(gloss);
+        g.fillRoundedRectangle(card.removeFromTop(card.getHeight() * 0.46f), 21.0f);
+    }
 
     auto header = headerBounds.toFloat().expanded(2.0f, 1.0f);
     auto headerBand = header;
@@ -3490,20 +4113,20 @@ void MainComponent::paint(juce::Graphics& g)
     headerPath.addRoundedRectangle(headerBand.getX(), headerBand.getY(), headerBand.getWidth(), headerBand.getHeight(),
                                    15.0f, 15.0f,
                                    true, true, false, false);
-    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(transparentMode ? 0.40f : 0.52f), headerBand.getX(), headerBand.getY(),
-                                    kUiPanel.withAlpha(transparentMode ? 0.04f : 0.07f), headerBand.getX(), headerBand.getBottom(), false);
+    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(transparentMode ? 0.14f : 0.52f), headerBand.getX(), headerBand.getY(),
+                                    kUiPanel.withAlpha(transparentMode ? 0.005f : 0.07f), headerBand.getX(), headerBand.getBottom(), false);
     g.setGradientFill(headerFill);
     g.fillPath(headerPath);
     g.setColour(kUiAccent.withAlpha(transparentMode ? 0.16f : 0.11f));
     g.strokePath(headerPath, juce::PathStrokeType(0.9f));
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.03f : 0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.008f : 0.02f));
     g.fillRoundedRectangle(chainPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.16f));
     g.drawRoundedRectangle(chainPane, 10.0f, 1.1f);
     auto diagPane = diagnostics.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.03f : 0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.008f : 0.02f));
     g.fillRoundedRectangle(diagPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);
@@ -3567,23 +4190,31 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::paintOverChildren(juce::Graphics& g)
 {
+    const bool settingsVisible = settingsPanel != nullptr && settingsPanel->isVisible() && settingsPanelAlpha > 0.02f;
+    const bool lowCostPass = draggingWindow || draggingResizeGrip;
     const auto header = headerBounds.toFloat();
     const auto dividerY = header.getBottom() + 8.0f;
     const auto dividerX = header.getX() + 14.0f;
     const auto dividerW = header.getWidth() - 28.0f;
-    g.setColour(kUiAccent.withAlpha(0.040f));
-    g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.2f);
+    if (! settingsVisible)
+    {
+        g.setColour(kUiAccent.withAlpha(0.040f));
+        g.drawLine(dividerX, dividerY, dividerX + dividerW, dividerY, 1.2f);
 
-    const auto loopWidth = dividerW + 220.0f;
-    const auto phase = std::fmod(uiPulse * 72.0f, loopWidth);
-    const auto x0 = dividerX - 60.0f + phase;
-    juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
-                               kUiAccentSoft.withAlpha(0.26f), x0 + 86.0f, dividerY, false);
-    sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
-    g.setGradientFill(sweep);
-    g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.2f, dividerW, 2.4f));
+        if (! lowCostPass)
+        {
+            const auto loopWidth = dividerW + 220.0f;
+            const auto phase = std::fmod(uiPulse * 72.0f, loopWidth);
+            const auto x0 = dividerX - 60.0f + phase;
+            juce::ColourGradient sweep(juce::Colour(0xffffffff).withAlpha(0.0f), x0, dividerY,
+                                       kUiAccentSoft.withAlpha(0.26f), x0 + 86.0f, dividerY, false);
+            sweep.addColour(1.0, juce::Colour(0xffffffff).withAlpha(0.0f));
+            g.setGradientFill(sweep);
+            g.fillRect(juce::Rectangle<float>(dividerX, dividerY - 1.2f, dividerW, 2.4f));
+        }
+    }
 
-    if (engine.isListenEnabled())
+    if (! settingsVisible && engine.isListenEnabled())
     {
         auto lb = routeSpeakersButton.getBounds().toFloat();
         auto led = juce::Rectangle<float>(lb.getRight() - 16.0f, lb.getCentreY() - 4.0f, 8.0f, 8.0f);
@@ -3627,6 +4258,58 @@ void MainComponent::paintOverChildren(juce::Graphics& g)
         shellPath.addRoundedRectangle(shell, 24.0f);
         g.setColour(kUiAccentSoft.withAlpha(0.08f * styleTransitionAlpha));
         g.strokePath(shellPath, juce::PathStrokeType(2.0f));
+    }
+
+    if (! windowMaximized && ! resizeGripBounds.isEmpty())
+    {
+        auto grip = resizeGripBounds.toFloat();
+        g.setColour(kUiPanel.withAlpha(0.34f));
+        g.fillRoundedRectangle(grip, 8.0f);
+        g.setColour(kUiAccent.withAlpha(0.28f));
+        g.drawRoundedRectangle(grip.reduced(0.4f), 7.6f, 1.0f);
+        g.setColour(kUiAccentSoft.withAlpha(0.72f));
+        const auto gx = grip.getRight() - 5.0f;
+        const auto gy = grip.getBottom() - 5.0f;
+        g.drawLine(gx - 10.0f, gy, gx, gy - 10.0f, 1.2f);
+        g.drawLine(gx - 6.0f, gy, gx, gy - 6.0f, 1.2f);
+        g.drawLine(gx - 2.0f, gy, gx, gy - 2.0f, 1.2f);
+    }
+
+    if (logoFizzActive && ! logoFizzBubbles.empty())
+    {
+        auto shell = getLocalBounds().toFloat().reduced(6.0f, 2.0f);
+        juce::Path shellPath;
+        shellPath.addRoundedRectangle(shell, 24.0f);
+        g.saveState();
+        g.reduceClipRegion(shellPath);
+        const int bubbleStep = lowCostPass ? 2 : 1;
+        for (int i = 0; i < static_cast<int>(logoFizzBubbles.size()); i += bubbleStep)
+        {
+            const auto& b = logoFizzBubbles[static_cast<size_t>(i)];
+            if (b.alpha <= 0.0f)
+                continue;
+            auto bubble = juce::Rectangle<float>(b.pos.x - b.radius, b.pos.y - b.radius, b.radius * 2.0f, b.radius * 2.0f);
+            if (lowCostPass)
+            {
+                g.setColour(kUiAccentSoft.withAlpha(0.34f * b.alpha));
+                g.fillEllipse(bubble);
+            }
+            else
+            {
+                juce::ColourGradient fill(kUiAccentSoft.withAlpha(0.50f * b.alpha), bubble.getCentreX(), bubble.getY(),
+                                          kUiAccent.withAlpha(0.20f * b.alpha), bubble.getCentreX(), bubble.getBottom(), false);
+                g.setGradientFill(fill);
+                g.fillEllipse(bubble);
+            }
+            g.setColour(juce::Colours::white.withAlpha(0.45f * b.alpha));
+            g.drawEllipse(bubble, 1.1f);
+            if (! lowCostPass)
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.24f * b.alpha));
+                g.fillEllipse(bubble.getX() + b.radius * 0.45f, bubble.getY() + b.radius * 0.18f, b.radius * 0.42f, b.radius * 0.42f);
+            }
+        }
+        g.restoreState();
     }
 
     if (restartOverlayAlpha > 0.01f || restartOverlayBusy)
@@ -3712,7 +4395,7 @@ void MainComponent::resized()
     presetBox.setBounds(devices.removeFromLeft(presetW));
 
     area.removeFromTop(gap);
-    auto actions = area.removeFromTop(juce::roundToInt(36.0f * uiScale));
+    const int actionRowH = juce::roundToInt(36.0f * uiScale);
     int saveW = juce::roundToInt(132.0f * uiScale);
     int deleteW = juce::roundToInt(108.0f * uiScale);
     int restartW = juce::roundToInt(126.0f * uiScale);
@@ -3722,33 +4405,75 @@ void MainComponent::resized()
     int listenW = juce::roundToInt(106.0f * uiScale);
     int settingsW = juce::roundToInt(106.0f * uiScale);
 
-    const int availableW = actions.getWidth() - (gap * 7);
-    int requestedW = saveW + deleteW + restartW + aboutW + toneW + effectsW + listenW + settingsW;
-    if (requestedW > availableW && availableW > 0)
-    {
-        const float scale = static_cast<float>(availableW) / static_cast<float>(requestedW);
-        auto scaleDown = [scale](int value, int minValue)
-        {
-            return juce::jmax(minValue, juce::roundToInt(static_cast<float>(value) * scale));
-        };
-        saveW = scaleDown(saveW, juce::roundToInt(100.0f * uiScale));
-        deleteW = scaleDown(deleteW, juce::roundToInt(84.0f * uiScale));
-        restartW = scaleDown(restartW, juce::roundToInt(98.0f * uiScale));
-        aboutW = scaleDown(aboutW, juce::roundToInt(76.0f * uiScale));
-        toneW = scaleDown(toneW, juce::roundToInt(74.0f * uiScale));
-        effectsW = scaleDown(effectsW, juce::roundToInt(90.0f * uiScale));
-        listenW = scaleDown(listenW, juce::roundToInt(86.0f * uiScale));
-        settingsW = scaleDown(settingsW, juce::roundToInt(86.0f * uiScale));
-    }
+    const int singleRowAvailable = area.getWidth() - (gap * 7);
+    const int minRequestedW =
+        juce::roundToInt(100.0f * uiScale) +
+        juce::roundToInt(84.0f * uiScale) +
+        juce::roundToInt(98.0f * uiScale) +
+        juce::roundToInt(76.0f * uiScale) +
+        juce::roundToInt(74.0f * uiScale) +
+        juce::roundToInt(90.0f * uiScale) +
+        juce::roundToInt(86.0f * uiScale) +
+        juce::roundToInt(86.0f * uiScale);
+    const bool splitActionRows = singleRowAvailable < minRequestedW;
 
-    savePresetButton.setBounds(actions.removeFromLeft(saveW)); actions.removeFromLeft(gap);
-    deletePresetButton.setBounds(actions.removeFromLeft(deleteW)); actions.removeFromLeft(gap);
-    restartButton.setBounds(actions.removeFromLeft(restartW)); actions.removeFromLeft(gap);
-    aboutButton.setBounds(actions.removeFromLeft(aboutW)); actions.removeFromLeft(gap);
-    toneButton.setBounds(actions.removeFromLeft(toneW)); actions.removeFromLeft(gap);
-    effectsToggle.setBounds(actions.removeFromLeft(effectsW)); actions.removeFromLeft(gap);
-    routeSpeakersButton.setBounds(actions.removeFromLeft(listenW)); actions.removeFromLeft(gap);
-    settingsButton.setBounds(actions.removeFromLeft(settingsW));
+    if (splitActionRows)
+    {
+        auto actionsBlock = area.removeFromTop(actionRowH * 2 + gap);
+        auto firstRow = actionsBlock.removeFromTop(actionRowH);
+        actionsBlock.removeFromTop(gap);
+        auto secondRow = actionsBlock.removeFromTop(actionRowH);
+
+        auto layoutFourButtons = [gap](juce::Rectangle<int> row, std::array<juce::Button*, 4> rowButtons)
+        {
+            const int cellW = juce::jmax(76, (row.getWidth() - gap * 3) / 4);
+            for (size_t i = 0; i < rowButtons.size(); ++i)
+            {
+                auto* b = rowButtons[i];
+                if (b == nullptr)
+                    continue;
+                const bool last = (i == rowButtons.size() - 1);
+                const int w = last ? row.getWidth() : cellW;
+                b->setBounds(row.removeFromLeft(w));
+                if (! last)
+                    row.removeFromLeft(gap);
+            }
+        };
+
+        layoutFourButtons(firstRow, { &savePresetButton, &deletePresetButton, &restartButton, &aboutButton });
+        layoutFourButtons(secondRow, { &toneButton, &effectsToggle, &routeSpeakersButton, &settingsButton });
+    }
+    else
+    {
+        auto actions = area.removeFromTop(actionRowH);
+        const int availableW = actions.getWidth() - (gap * 7);
+        int requestedW = saveW + deleteW + restartW + aboutW + toneW + effectsW + listenW + settingsW;
+        if (requestedW > availableW && availableW > 0)
+        {
+            const float scale = static_cast<float>(availableW) / static_cast<float>(requestedW);
+            auto scaleDown = [scale](int value, int minValue)
+            {
+                return juce::jmax(minValue, juce::roundToInt(static_cast<float>(value) * scale));
+            };
+            saveW = scaleDown(saveW, juce::roundToInt(100.0f * uiScale));
+            deleteW = scaleDown(deleteW, juce::roundToInt(84.0f * uiScale));
+            restartW = scaleDown(restartW, juce::roundToInt(98.0f * uiScale));
+            aboutW = scaleDown(aboutW, juce::roundToInt(76.0f * uiScale));
+            toneW = scaleDown(toneW, juce::roundToInt(74.0f * uiScale));
+            effectsW = scaleDown(effectsW, juce::roundToInt(90.0f * uiScale));
+            listenW = scaleDown(listenW, juce::roundToInt(86.0f * uiScale));
+            settingsW = scaleDown(settingsW, juce::roundToInt(86.0f * uiScale));
+        }
+
+        savePresetButton.setBounds(actions.removeFromLeft(saveW)); actions.removeFromLeft(gap);
+        deletePresetButton.setBounds(actions.removeFromLeft(deleteW)); actions.removeFromLeft(gap);
+        restartButton.setBounds(actions.removeFromLeft(restartW)); actions.removeFromLeft(gap);
+        aboutButton.setBounds(actions.removeFromLeft(aboutW)); actions.removeFromLeft(gap);
+        toneButton.setBounds(actions.removeFromLeft(toneW)); actions.removeFromLeft(gap);
+        effectsToggle.setBounds(actions.removeFromLeft(effectsW)); actions.removeFromLeft(gap);
+        routeSpeakersButton.setBounds(actions.removeFromLeft(listenW)); actions.removeFromLeft(gap);
+        settingsButton.setBounds(actions.removeFromLeft(settingsW));
+    }
 
     area.removeFromTop(gap);
     auto gainRow = area.removeFromTop(juce::roundToInt(30.0f * uiScale));
@@ -3792,14 +4517,29 @@ void MainComponent::resized()
     dragHintLabel.setBounds(vstRow2.removeFromLeft(juce::roundToInt(220.0f * uiScale)));
 
     area.removeFromTop(gap);
-    const int listHeight = juce::jmax(120, static_cast<int>(getHeight() * (compactFactor == 0 ? 0.26f : 0.22f)));
+    const int rowsVisible = juce::jlimit(1, 3, juce::jmax(1, getNumRows()));
+    const int desiredListHeight = juce::roundToInt(rowsVisible * static_cast<float>(vstChainList.getRowHeight())
+                                                   + (10.0f * uiScale));
+    const int minDiagHeight = juce::roundToInt((compactFactor == 0 ? 190.0f : 160.0f) * uiScale);
+    const int maxListByRemaining = juce::jmax(100, area.getHeight() - minDiagHeight - gap);
+    const int listHeight = juce::jlimit(100, maxListByRemaining, desiredListHeight);
     vstChainList.setBounds(area.removeFromTop(listHeight));
 
     area.removeFromTop(gap);
     diagnostics.setBounds(area);
-    auto versionBounds = diagnostics.getBounds().removeFromBottom(juce::roundToInt(18.0f * uiScale)).removeFromRight(juce::roundToInt(88.0f * uiScale));
-    versionLabel.setBounds(versionBounds.translated(-4, -2));
+    const int gripSize = juce::roundToInt(30.0f * uiScale);
+    const int gripInset = juce::roundToInt(7.0f * uiScale);
+    auto versionStrip = diagnostics.getBounds().removeFromBottom(juce::roundToInt(18.0f * uiScale));
+    if (! windowMaximized)
+        versionStrip = versionStrip.withTrimmedRight(gripSize + gripInset + juce::roundToInt(8.0f * uiScale));
+    auto versionBounds = versionStrip.removeFromRight(juce::roundToInt(92.0f * uiScale));
+    versionLabel.setBounds(versionBounds.translated(-3, -2));
     versionLabel.toFront(false);
+    resizeGripBounds = getLocalBounds()
+                           .withTrimmedLeft(getWidth() - (gripSize + gripInset))
+                           .withTrimmedTop(getHeight() - (gripSize + gripInset))
+                           .removeFromRight(gripSize)
+                           .removeFromBottom(gripSize);
 
     if (settingsPanel != nullptr)
     {
@@ -3822,10 +4562,21 @@ void MainComponent::resized()
         auto sidebar = panel.removeFromLeft(sidebarW).reduced(juce::roundToInt(12.0f * uiScale));
         if (auto* overlay = dynamic_cast<SettingsOverlay*>(settingsPanel.get()))
             overlay->setSidebarWidth(static_cast<float>(sidebarW));
-        const int navRowH = juce::roundToInt(32.0f * uiScale);
-        const int navGap = juce::jmax(4, juce::roundToInt(6.0f * uiScale));
+        int navRowH = juce::roundToInt(32.0f * uiScale);
+        int navGap = juce::jmax(4, juce::roundToInt(6.0f * uiScale));
         settingsNavLabel.setBounds(sidebar.removeFromTop(juce::roundToInt(24.0f * uiScale)));
         sidebar.removeFromTop(juce::roundToInt(8.0f * uiScale));
+        const int navItems = 4;
+        const int availableNavH = juce::jmax(0, sidebar.getHeight());
+        int requiredNavH = navItems * navRowH + (navItems - 1) * navGap;
+        if (requiredNavH > availableNavH && availableNavH > 0)
+        {
+            navRowH = juce::jmax(juce::roundToInt(20.0f * uiScale),
+                                 (availableNavH - (navItems - 1) * navGap) / navItems);
+            requiredNavH = navItems * navRowH + (navItems - 1) * navGap;
+            if (requiredNavH > availableNavH)
+                navGap = juce::jmax(2, (availableNavH - navItems * navRowH) / (navItems - 1));
+        }
         settingsNavAutoEnableButton.setBounds(sidebar.removeFromTop(navRowH));
         sidebar.removeFromTop(navGap);
         settingsNavAppearanceButton.setBounds(sidebar.removeFromTop(navRowH));
@@ -3838,6 +4589,40 @@ void MainComponent::resized()
         auto contentNoFooter = content;
         auto footer = contentNoFooter.removeFromBottom(juce::roundToInt(34.0f * uiScale));
         closeSettingsButton.setBounds(footer.removeFromLeft(juce::roundToInt(92.0f * uiScale)));
+
+        const auto h20 = juce::roundToInt(20.0f * uiScale);
+        const auto h22 = juce::roundToInt(22.0f * uiScale);
+        const auto h28 = juce::roundToInt(28.0f * uiScale);
+        const auto h30 = juce::roundToInt(30.0f * uiScale);
+        const auto h36 = juce::roundToInt(36.0f * uiScale);
+        const auto h56 = juce::roundToInt(56.0f * uiScale);
+        const auto h94 = juce::roundToInt(94.0f * uiScale);
+        const auto h96 = juce::roundToInt(96.0f * uiScale);
+        const auto h120 = juce::roundToInt(120.0f * uiScale);
+        const auto tabRequiredHeight = [this, gap, h20, h22, h28, h30, h36, h56, h94, h96, h120]()
+        {
+            switch (activeSettingsTab)
+            {
+                case 0:
+                    return h22 + h28 + gap + h20 + h28 + gap + h20 + h120 + gap
+                         + h20 + h94 + gap + h28 + gap + h28 + gap + h30;
+                case 1:
+                    return h22 + gap + h20 + h28 + gap + h20 + h30 + gap
+                         + h20 + h30 + gap + h20 + h30;
+                case 2:
+                    return h22 + h28 + gap + h30 + gap + h56 + gap + h20 + h30;
+                case 3:
+                    return h22 + gap + h20 + h30 + gap + h20 + h96 + gap + h30 + gap
+                         + h28 + gap + h28 + gap + h28 + gap + h36;
+                default:
+                    break;
+            }
+            return 0;
+        }();
+        settingsScrollMax = juce::jmax(0, tabRequiredHeight - contentNoFooter.getHeight());
+        settingsScrollY = juce::jlimit(0, settingsScrollMax, settingsScrollY);
+        if (settingsScrollMax > 0)
+            contentNoFooter = contentNoFooter.translated(0, -settingsScrollY);
 
         if (activeSettingsTab == 0)
         {
@@ -3898,6 +4683,18 @@ void MainComponent::resized()
         else if (activeSettingsTab == 3)
         {
             startupLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(22.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
+            behaviorListenDeviceLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(20.0f * uiScale)));
+            behaviorListenDeviceBox.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(30.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
+            behaviorVstFoldersLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(20.0f * uiScale)));
+            behaviorVstFoldersListBox.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(96.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
+            auto folderRow = contentNoFooter.removeFromTop(juce::roundToInt(30.0f * uiScale));
+            behaviorAddVstFolderButton.setBounds(folderRow.removeFromLeft(juce::roundToInt(132.0f * uiScale)));
+            folderRow.removeFromLeft(gap);
+            behaviorRemoveVstFolderButton.setBounds(folderRow.removeFromLeft(juce::roundToInt(136.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
             startWithWindowsToggle.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
             contentNoFooter.removeFromTop(gap);
             startMinimizedToggle.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
