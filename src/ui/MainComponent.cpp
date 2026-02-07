@@ -1093,7 +1093,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 
     appearanceThemeBox.addItem("Aqua", 1);
     appearanceThemeBox.addItem("Salmon", 2);
-    appearanceBackgroundBox.addItem("Transparent", 1);
+    appearanceBackgroundBox.addItem("Transparent (Beta)", 1);
     appearanceBackgroundBox.addItem("Opaque", 2);
     appearanceSizeBox.addItem("Small (Compact)", 1);
     appearanceSizeBox.addItem("Normal", 2);
@@ -2021,10 +2021,12 @@ void MainComponent::showFirstLaunchGuide()
         "5) Use Listen if you want local monitoring.\n\n"
         "Tip: Save a preset after your first good setup.";
 
-    juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
-                                                "First Launch Guide",
-                                                guide,
-                                                this);
+    auto* prompt = new juce::AlertWindow("First Launch Guide",
+                                         guide,
+                                         juce::AlertWindow::InfoIcon);
+    prompt->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    prompt->setEscapeKeyCancels(false);
+    prompt->enterModalState(true, nullptr, true);
 }
 
 void MainComponent::triggerLogoFizzAnimation()
@@ -2079,6 +2081,18 @@ void MainComponent::toggleWindowMaximize()
 
 void MainComponent::mouseDown(const juce::MouseEvent& e)
 {
+    if (auto* modalMgr = juce::ModalComponentManager::getInstance())
+    {
+        if (modalMgr->getNumModalComponents() > 0)
+        {
+            if (auto* modal = modalMgr->getModalComponent(0))
+            {
+                if (modal != this)
+                    return;
+            }
+        }
+    }
+
     const auto localEvent = e.getEventRelativeTo(this);
     const auto localPos = localEvent.getPosition();
     draggingWindow = false;
