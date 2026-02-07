@@ -68,3 +68,7 @@ If you skip it, use this:
 ## 📄 License
 
 MIT
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=softlynn/Fizzle&type=date&legend=top-left)](https://www.star-history.com/#softlynn/Fizzle&type=date&legend=top-left)
