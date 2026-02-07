@@ -51,6 +51,7 @@ public:
 private:
     AudioEngine& engine;
     juce::TextEditor text;
+    juce::String lastText;
 
     void timerCallback() override
     {
@@ -77,7 +78,11 @@ private:
         s << line("Input Level", levelToText(d.inputLevel));
         s << line("Output Level", levelToText(d.outputLevel));
         s << line("Dropped Buffers", juce::String(static_cast<int64_t>(d.droppedBuffers)));
-        text.setText(s, false);
+        if (s != lastText)
+        {
+            lastText = s;
+            text.setText(lastText, false);
+        }
     }
 };
 }

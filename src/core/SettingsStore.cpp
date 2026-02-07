@@ -51,7 +51,7 @@ EngineSettings fromVar(const juce::var& data)
                             : false;
         out.transparentBackground = obj->hasProperty("transparentBackground")
                                         ? static_cast<bool>(obj->getProperty("transparentBackground"))
-                                        : true;
+                                        : false;
         out.themeVariant = obj->hasProperty("themeVariant")
                                ? static_cast<int>(obj->getProperty("themeVariant"))
                                : 0;

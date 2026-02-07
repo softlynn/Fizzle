@@ -746,6 +746,13 @@ public:
     {
         if (auto* lb = findParentComponentOfClass<juce::ListBox>())
             lb->selectRow(row);
+        pointerDownWasRight = e.mods.isRightButtonDown();
+        if (pointerDownWasRight)
+        {
+            if (! isEventFromInteractiveControl(e) && showMenu)
+                showMenu(row, e.getScreenPosition());
+            return;
+        }
         pointerDownWasLeft = e.mods.isLeftButtonDown();
         if (! pointerDownWasLeft)
             return;
@@ -795,8 +802,6 @@ public:
             targetScale = 1.0f;
             setAlwaysOnTop(false);
             startTimerHz(60);
-            if (showMenu)
-                showMenu(row, e.getScreenPosition());
             repaint();
             return;
         }
@@ -824,6 +829,7 @@ private:
     bool selected { false };
     bool dragging { false };
     bool pointerDownWasLeft { false };
+    bool pointerDownWasRight { false };
     float dragOffsetY { 0.0f };
     float currentScale { 1.0f };
     float targetScale { 1.0f };
@@ -927,6 +933,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     setLookAndFeel(&modern);
     setWantsKeyboardFocus(true);
     setMouseClickGrabsKeyboardFocus(true);
+    addMouseListener(this, true);
     appLogo = juce::ImageFileFormat::loadFrom(BinaryData::app_png, BinaryData::app_pngSize);
 
     title.setText("fizzle", juce::dontSendNotification);
@@ -2014,9 +2021,10 @@ void MainComponent::showFirstLaunchGuide()
         "5) Use Listen if you want local monitoring.\n\n"
         "Tip: Save a preset after your first good setup.";
 
-    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                           "First Launch Guide",
-                                           guide);
+    juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+                                                "First Launch Guide",
+                                                guide,
+                                                this);
 }
 
 void MainComponent::triggerLogoFizzAnimation()
@@ -2071,27 +2079,54 @@ void MainComponent::toggleWindowMaximize()
 
 void MainComponent::mouseDown(const juce::MouseEvent& e)
 {
+    const auto localEvent = e.getEventRelativeTo(this);
+    const auto localPos = localEvent.getPosition();
     draggingWindow = false;
     draggingResizeGrip = false;
 
-    if (e.mods.isLeftButtonDown() && resizeGripBounds.contains(e.getPosition()))
+    if (localEvent.mods.isLeftButtonDown() && resizeGripBounds.contains(localPos))
     {
         if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
         {
             draggingResizeGrip = true;
-            resizeDragStartScreen = e.getScreenPosition();
+            resizeDragStartScreen = localEvent.getScreenPosition();
             resizeStartBounds = window->getBounds();
             return;
         }
     }
 
-    if (! headerBounds.contains(e.getPosition()))
+    auto isInteractiveClick = [this](juce::Component* c)
+    {
+        for (auto* p = c; p != nullptr; p = p->getParentComponent())
+        {
+            if (p == this)
+                break;
+            if (p == settingsPanel.get())
+                return true;
+            if (dynamic_cast<juce::Button*>(p) != nullptr
+                || dynamic_cast<juce::ComboBox*>(p) != nullptr
+                || dynamic_cast<juce::Slider*>(p) != nullptr
+                || dynamic_cast<juce::TextEditor*>(p) != nullptr
+                || dynamic_cast<juce::ListBox*>(p) != nullptr)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const bool inHeader = headerBounds.contains(localPos);
+    const bool allowAnimationDrag = logoFizzActive && ! isInteractiveClick(localEvent.originalComponent);
+    const bool inDragZone = inHeader || allowAnimationDrag;
+    if (! inDragZone)
         return;
 
-    if (e.originalComponent == &windowMinButton || e.originalComponent == &windowMaxButton || e.originalComponent == &windowCloseButton)
-        return;
+    if (localEvent.originalComponent == &windowMinButton
+        || localEvent.originalComponent == &windowMaxButton
+        || localEvent.originalComponent == &windowCloseButton)
+    return;
 
-    if (headerLogoBounds.contains(e.getPosition()))
+    if (headerLogoBounds.contains(localPos))
         triggerLogoFizzAnimation();
 
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
@@ -2109,18 +2144,19 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
             }
         }
 #endif
-        windowDragger.startDraggingComponent(window, e);
+        windowDragger.startDraggingComponent(window, localEvent);
         draggingWindow = true;
     }
 }
 
 void MainComponent::mouseDrag(const juce::MouseEvent& e)
 {
+    const auto localEvent = e.getEventRelativeTo(this);
     if (draggingResizeGrip)
     {
         if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
         {
-            auto delta = e.getScreenPosition() - resizeDragStartScreen;
+            auto delta = localEvent.getScreenPosition() - resizeDragStartScreen;
             auto newBounds = resizeStartBounds;
             newBounds.setWidth(juce::jmax(420, resizeStartBounds.getWidth() + delta.x));
             newBounds.setHeight(juce::jmax(320, resizeStartBounds.getHeight() + delta.y));
@@ -2133,7 +2169,7 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
         return;
 
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
-        windowDragger.dragComponent(window, e, nullptr);
+        windowDragger.dragComponent(window, localEvent, nullptr);
 }
 
 void MainComponent::mouseUp(const juce::MouseEvent&)
@@ -2144,7 +2180,7 @@ void MainComponent::mouseUp(const juce::MouseEvent&)
 
 void MainComponent::mouseDoubleClick(const juce::MouseEvent& e)
 {
-    if (headerBounds.contains(e.getPosition()))
+    if (headerBounds.contains(e.getEventRelativeTo(this).getPosition()))
         toggleWindowMaximize();
 }
 
@@ -2539,7 +2575,7 @@ void MainComponent::applyThemePalette()
         kUiMint = lightMode ? juce::Colour(0xff66aac8) : juce::Colour(0xff9af7d8);
     }
 
-    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.62f : 0.56f) : 1.0f;
+    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.82f : 0.78f) : 1.0f;
 
     theme::background = kUiBg;
     theme::panel = kUiPanel;
@@ -3747,9 +3783,8 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 
 void MainComponent::timerCallback()
 {
-    auto setTimerRate = [this](bool highFps)
+    auto setTimerRate = [this](int desired)
     {
-        const int desired = highFps ? 60 : 30;
         if (desired != uiTimerHz)
         {
             uiTimerHz = desired;
@@ -3758,10 +3793,11 @@ void MainComponent::timerCallback()
     };
 
     ++uiTickCount;
-    uiPulse += draggingWindow ? 0.010f : 0.022f;
+
     if (draggingWindow)
     {
-        setTimerRate(true);
+        uiPulse += 0.010f;
+        setTimerRate(60);
         repaint(headerBounds.expanded(28, 12));
         return;
     }
@@ -3785,7 +3821,7 @@ void MainComponent::timerCallback()
         virtualMicStatusLabel.setText(currentVirtualStatus, juce::dontSendNotification);
     }
 
-    if (cachedSettings.autoEnableByApp && (uiTickCount % 20 == 0))
+    if (cachedSettings.autoEnableByApp && (uiTickCount % 10 == 0))
     {
         bool hasCondition = false;
         const auto shouldEnable = computeAutoEnableShouldEnable(hasCondition);
@@ -3971,23 +4007,32 @@ void MainComponent::timerCallback()
     if (styleTransitionAlpha < 0.01f)
         styleTransitionAlpha = 0.0f;
 
-    auto dirty = headerBounds.expanded(20, 8)
-                     .getUnion(routeSpeakersButton.getBounds().expanded(12, 6));
+    juce::Rectangle<int> dirty;
+    bool hasDirty = false;
+    auto addDirty = [&dirty, &hasDirty](juce::Rectangle<int> r)
+    {
+        if (r.isEmpty())
+            return;
+        dirty = hasDirty ? dirty.getUnion(r) : r;
+        hasDirty = true;
+    };
 
     if (savePresetFlashAlpha > 0.0f)
-        dirty = dirty.getUnion(savePresetButton.getBounds().expanded(6, 4));
+        addDirty(savePresetButton.getBounds().expanded(6, 4));
     if (aboutFlashAlpha > 0.0f)
-        dirty = dirty.getUnion(aboutButton.getBounds().expanded(6, 4));
+        addDirty(aboutButton.getBounds().expanded(6, 4));
     if (listenStateChanged)
-        dirty = dirty.getUnion(routeSpeakersButton.getBounds().expanded(10, 6));
+        addDirty(routeSpeakersButton.getBounds().expanded(10, 6));
     if (muteStateChanged)
-        dirty = dirty.getUnion(effectsToggle.getBounds().expanded(140, 18));
+        addDirty(effectsToggle.getBounds().expanded(140, 18));
     if (overlayAlphaChanged || restartOverlayActive)
-        dirty = dirty.getUnion(getLocalBounds());
+        addDirty(getLocalBounds());
     if (std::abs(effectsHintAlpha - hintBefore) > 0.0005f)
-        dirty = dirty.getUnion(effectsHintLabel.getBounds().expanded(8, 4));
+        addDirty(effectsHintLabel.getBounds().expanded(8, 4));
     if (styleTransitionAlpha > 0.0f)
-        dirty = dirty.getUnion(getLocalBounds());
+        addDirty(getLocalBounds());
+    if (logoFizzActive)
+        addDirty(getLocalBounds());
 
     if (settingsAlphaChanged && settingsPanel != nullptr && settingsPanel->isVisible())
         settingsPanel->repaint();
@@ -3995,15 +4040,29 @@ void MainComponent::timerCallback()
     const bool highFpsNeeded = draggingResizeGrip
                             || logoFizzActive
                             || restartOverlayBusy
-                            || restartOverlayAlpha > 0.02f
-                            || settingsPanelTargetVisible
-                            || settingsPanelAlpha > 0.02f
-                            || styleTransitionAlpha > 0.02f
-                            || savePresetFlashAlpha > 0.02f
-                            || aboutFlashAlpha > 0.02f;
-    setTimerRate(highFpsNeeded);
+                            || restartOverlayAlpha > 0.02f;
+    const bool mediumFpsNeeded = settingsPanelTargetVisible
+                              || settingsPanelAlpha > 0.02f
+                              || styleTransitionAlpha > 0.02f
+                              || savePresetFlashAlpha > 0.02f
+                              || aboutFlashAlpha > 0.02f
+                              || effectsHintAlpha > 0.02f
+                              || effectsHintTargetAlpha > 0.02f;
+    const bool dividerAnimationNeeded = ! highFpsNeeded
+                                     && ! mediumFpsNeeded
+                                     && ! (settingsPanel != nullptr && settingsPanel->isVisible() && settingsPanelAlpha > 0.02f)
+                                     && (uiTickCount % 4 == 0);
 
-    repaint(dirty);
+    if (highFpsNeeded || mediumFpsNeeded || dividerAnimationNeeded)
+    {
+        uiPulse += highFpsNeeded ? 0.020f : 0.010f;
+        addDirty(headerBounds.expanded(18, 10));
+    }
+
+    setTimerRate(highFpsNeeded ? 60 : (mediumFpsNeeded ? 30 : 15));
+
+    if (hasDirty)
+        repaint(dirty);
 }
 
 int MainComponent::getNumRows()
@@ -4042,8 +4101,8 @@ juce::Component* MainComponent::refreshComponentForRow(int rowNumber, bool isRow
 
 void MainComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colours::transparentBlack);
     const bool transparentMode = cachedSettings.transparentBackground;
+    g.fillAll(juce::Colours::transparentBlack);
     auto shell = getLocalBounds().toFloat().reduced(6.0f, 2.0f);
     constexpr float shellRadius = 25.0f;
     auto makePanelPath = [](juce::Rectangle<float> r, float radius)
@@ -4060,7 +4119,7 @@ void MainComponent::paint(juce::Graphics& g)
 
     const bool lowCostPass = draggingWindow || draggingResizeGrip;
     const bool lightMode = cachedSettings.lightMode;
-    const float shellBaseAlpha = transparentMode ? (lightMode ? 0.22f : 0.18f) : 1.0f;
+    const float shellBaseAlpha = transparentMode ? (lightMode ? 0.86f : 0.82f) : 1.0f;
     const auto bgTop = transparentMode ? kUiBg.brighter(lightMode ? 0.05f : 0.02f) : kUiBg.brighter(0.05f);
     const auto bgBottom = transparentMode ? kUiBg.darker(lightMode ? 0.10f : 0.12f) : kUiBg.darker(0.14f);
     juce::ColourGradient bg(bgTop.withAlpha(shellBaseAlpha * kUiBackgroundAlphaScale),
@@ -4071,7 +4130,7 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillPath(shellPath);
     if (transparentMode)
     {
-        g.setColour(juce::Colours::black.withAlpha(lightMode ? 0.06f : 0.05f));
+        g.setColour(juce::Colours::black.withAlpha(lightMode ? 0.11f : 0.10f));
         g.fillPath(shellPath);
     }
     if (! lowCostPass)
@@ -4087,8 +4146,8 @@ void MainComponent::paint(juce::Graphics& g)
     g.strokePath(makePanelPath(shell.expanded(0.9f, 0.8f), shellRadius + 0.8f), juce::PathStrokeType(transparentMode ? 1.05f : 0.9f));
 
     auto card = shell.reduced(2.0f, 1.0f);
-    const auto cardTopAlpha = transparentMode ? (lightMode ? 0.13f : 0.11f) : 0.90f;
-    const auto cardBottomAlpha = transparentMode ? (lightMode ? 0.18f : 0.15f) : 0.96f;
+    const auto cardTopAlpha = transparentMode ? (lightMode ? 0.78f : 0.72f) : 0.90f;
+    const auto cardBottomAlpha = transparentMode ? (lightMode ? 0.84f : 0.78f) : 0.96f;
     juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(cardTopAlpha * kUiBackgroundAlphaScale), card.getX(), card.getY(),
                                   kUiPanel.withAlpha(cardBottomAlpha * kUiBackgroundAlphaScale), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
@@ -4113,20 +4172,20 @@ void MainComponent::paint(juce::Graphics& g)
     headerPath.addRoundedRectangle(headerBand.getX(), headerBand.getY(), headerBand.getWidth(), headerBand.getHeight(),
                                    15.0f, 15.0f,
                                    true, true, false, false);
-    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(transparentMode ? 0.14f : 0.52f), headerBand.getX(), headerBand.getY(),
-                                    kUiPanel.withAlpha(transparentMode ? 0.005f : 0.07f), headerBand.getX(), headerBand.getBottom(), false);
+    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(transparentMode ? 0.68f : 0.52f), headerBand.getX(), headerBand.getY(),
+                                    kUiPanel.withAlpha(transparentMode ? 0.32f : 0.07f), headerBand.getX(), headerBand.getBottom(), false);
     g.setGradientFill(headerFill);
     g.fillPath(headerPath);
     g.setColour(kUiAccent.withAlpha(transparentMode ? 0.16f : 0.11f));
     g.strokePath(headerPath, juce::PathStrokeType(0.9f));
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.008f : 0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.018f : 0.02f));
     g.fillRoundedRectangle(chainPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.16f));
     g.drawRoundedRectangle(chainPane, 10.0f, 1.1f);
     auto diagPane = diagnostics.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.008f : 0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.018f : 0.02f));
     g.fillRoundedRectangle(diagPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);

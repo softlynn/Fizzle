@@ -20,57 +20,6 @@
 #define DWMSBT_TRANSIENTWINDOW 3
 #endif
 
-// Undocumented Windows composition API used as fallback when DWM backdrop alone
-// does not provide true transparent+blurred client composition.
-enum ACCENT_STATE
-{
-    ACCENT_DISABLED = 0,
-    ACCENT_ENABLE_GRADIENT = 1,
-    ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
-    ACCENT_ENABLE_BLURBEHIND = 3,
-    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
-};
-
-struct ACCENT_POLICY
-{
-    int accentState;
-    int accentFlags;
-    int gradientColor;
-    int animationId;
-};
-
-struct WINDOWCOMPOSITIONATTRIBDATA
-{
-    int attrib;
-    PVOID data;
-    SIZE_T dataSize;
-};
-
-using SetWindowCompositionAttributeFn = BOOL(WINAPI*)(HWND, WINDOWCOMPOSITIONATTRIBDATA*);
-
-void applyAccentPolicy(HWND hwnd, bool transparent)
-{
-    auto* user32 = GetModuleHandleW(L"user32.dll");
-    if (user32 == nullptr)
-        return;
-
-    auto* setWindowCompositionAttribute = reinterpret_cast<SetWindowCompositionAttributeFn>(
-        GetProcAddress(user32, "SetWindowCompositionAttribute"));
-    if (setWindowCompositionAttribute == nullptr)
-        return;
-
-    ACCENT_POLICY accent {};
-    accent.accentState = transparent ? ACCENT_ENABLE_BLURBEHIND : ACCENT_DISABLED;
-    accent.accentFlags = transparent ? 2 : 0;
-    accent.gradientColor = transparent ? static_cast<int>(0x10203040) : 0;
-    accent.animationId = 0;
-
-    WINDOWCOMPOSITIONATTRIBDATA data {};
-    data.attrib = 19; // WCA_ACCENT_POLICY
-    data.data = &accent;
-    data.dataSize = sizeof(accent);
-    setWindowCompositionAttribute(hwnd, &data);
-}
 #endif
 
 namespace fizzle
@@ -92,6 +41,7 @@ MainWindow::MainWindow(std::unique_ptr<MainComponent> content)
     setColour(juce::ResizableWindow::backgroundColourId, juce::Colours::transparentBlack);
     setContentOwned(ownedContent.release(), true);
     centreWithSize(1100, 700);
+    applyRoundedWindowRegion();
     applyWindowsBackdrop(transparentBackgroundEnabled);
 }
 
@@ -118,6 +68,7 @@ juce::BorderSize<int> MainWindow::getBorderThickness() const
 void MainWindow::setTransparentBackgroundEnabled(bool enabled)
 {
     transparentBackgroundEnabled = enabled;
+    applyRoundedWindowRegion();
     applyWindowsBackdrop(transparentBackgroundEnabled);
     repaint();
 }
@@ -126,7 +77,16 @@ void MainWindow::visibilityChanged()
 {
     juce::DocumentWindow::visibilityChanged();
     if (isShowing())
+    {
+        applyRoundedWindowRegion();
         applyWindowsBackdrop(transparentBackgroundEnabled);
+    }
+}
+
+void MainWindow::resized()
+{
+    juce::DocumentWindow::resized();
+    applyRoundedWindowRegion();
 }
 
 void MainWindow::applyWindowsBackdrop(bool transparent)
@@ -136,13 +96,17 @@ void MainWindow::applyWindowsBackdrop(bool transparent)
     {
         if (auto hwnd = static_cast<HWND>(peer->getNativeHandle()))
         {
+            BOOL compositionEnabled = FALSE;
+            DwmIsCompositionEnabled(&compositionEnabled);
+            const bool useTransparent = transparent && compositionEnabled;
+
             DWM_BLURBEHIND blur {};
             blur.dwFlags = DWM_BB_ENABLE;
-            blur.fEnable = transparent ? TRUE : FALSE;
+            blur.fEnable = useTransparent ? TRUE : FALSE;
             DwmEnableBlurBehindWindow(hwnd, &blur);
 
             MARGINS margins {};
-            if (transparent)
+            if (useTransparent)
             {
                 margins.cxLeftWidth = -1;
                 margins.cxRightWidth = -1;
@@ -151,24 +115,11 @@ void MainWindow::applyWindowsBackdrop(bool transparent)
             }
             DwmExtendFrameIntoClientArea(hwnd, &margins);
 
-            const BOOL hostBackdrop = transparent ? TRUE : FALSE;
+            const BOOL hostBackdrop = useTransparent ? TRUE : FALSE;
             DwmSetWindowAttribute(hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, &hostBackdrop, sizeof(hostBackdrop));
 
-            const int backdrop = transparent ? DWMSBT_MAINWINDOW : DWMSBT_NONE;
+            const int backdrop = useTransparent ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
             DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
-
-            // Keep layered mode only in transparent mode to avoid extra
-            // composition overhead while dragging in opaque mode.
-            auto exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            if (transparent)
-                exStyle |= WS_EX_LAYERED;
-            else
-                exStyle &= ~WS_EX_LAYERED;
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
-            if (transparent)
-                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
-
-            applyAccentPolicy(hwnd, transparent);
 
             SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
@@ -176,6 +127,31 @@ void MainWindow::applyWindowsBackdrop(bool transparent)
     }
 #else
     juce::ignoreUnused(transparent);
+#endif
+}
+
+void MainWindow::applyRoundedWindowRegion()
+{
+#if JUCE_WINDOWS
+    if (auto* peer = getPeer())
+    {
+        if (auto hwnd = static_cast<HWND>(peer->getNativeHandle()))
+        {
+            RECT clientRect {};
+            if (! GetClientRect(hwnd, &clientRect))
+                return;
+
+            const int width = clientRect.right - clientRect.left;
+            const int height = clientRect.bottom - clientRect.top;
+            if (width <= 0 || height <= 0)
+                return;
+
+            const int radius = 24;
+            auto rgn = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius);
+            if (rgn != nullptr)
+                SetWindowRgn(hwnd, rgn, TRUE);
+        }
+    }
 #endif
 }
 }

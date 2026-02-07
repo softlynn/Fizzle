@@ -14,12 +14,14 @@ public:
     MainComponent* getMainComponent() const;
     void closeButtonPressed() override;
     void visibilityChanged() override;
+    void resized() override;
     juce::BorderSize<int> getContentComponentBorder() const override;
     juce::BorderSize<int> getBorderThickness() const override;
     void setTransparentBackgroundEnabled(bool enabled);
 
 private:
     void applyWindowsBackdrop(bool transparent);
+    void applyRoundedWindowRegion();
 
     std::unique_ptr<MainComponent> ownedContent;
     bool transparentBackgroundEnabled { false };

@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "Theme.h"
+#include <cmath>
 
 namespace fizzle
 {
@@ -10,7 +11,7 @@ class MeterComponent : public juce::Component, private juce::Timer
 public:
     MeterComponent()
     {
-        startTimerHz(30);
+        startTimerHz(20);
     }
 
     void setLevel(float newLevel)
@@ -43,7 +44,10 @@ private:
     {
         const auto t = target.load();
         const auto d = displayed.load();
-        displayed.store(d + (t - d) * 0.2f);
+        const auto next = d + (t - d) * 0.18f;
+        if (std::abs(next - d) < 0.0008f)
+            return;
+        displayed.store(next);
         repaint();
     }
 };
