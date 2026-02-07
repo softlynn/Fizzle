@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.9 - Transparency + Settings Scroll + Performance
+
+### Fixed
+- Transparent background mode now uses a stronger Windows composition fallback path to avoid white fallback surfaces.
+- Removed duplicate external corner resizer so only the in-app resize grip is used.
+- Added settings-panel scrolling support when the window is resized smaller than tab content.
+- Disabled diagnostics panel click interception so it no longer captures accidental input.
+
+### Changed
+- Added adaptive UI timer behavior to reduce GPU load while idle and keep animations smooth under interaction.
+- Refined light-mode button hover/press visibility so interactions are easier to see.
+- Added GitHub Pages favicon support.
+
 ## v0.1.8 - Stability + Appearance Settings Pass
 
 ### Fixed
