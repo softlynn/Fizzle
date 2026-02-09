@@ -72,6 +72,10 @@ MIT
 This project uses the [JUCE](https://juce.com) framework, which is licensed under [AGPL v3.0](https://github.com/juce-framework/JUCE/blob/master/LICENSE.md).
 Developed with [GPT-5.3-Codex](https://openai.com/index/introducing-gpt-5-3-codex/)
 
+<p align="center">
+  <img src="resources/icon/fizzle repo banner.png" alt="Fizzle Banner" />
+</p>
+
 ## Star History
 
 <a href="https://www.star-history.com/#softlynn/Fizzle&type=date&legend=top-left">
