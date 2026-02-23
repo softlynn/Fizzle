@@ -10,10 +10,12 @@
   <link rel="apple-touch-icon" href="assets/favicon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Sora:wght@500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <canvas id="siteGpuBackdrop" aria-hidden="true"></canvas>
+
   <div class="bg" aria-hidden="true">
     <div class="orb orb-a"></div>
     <div class="orb orb-b"></div>
@@ -24,14 +26,19 @@
   <header class="topbar reveal">
     <a class="brand" href="#top" aria-label="Fizzle Home">
       <img src="assets/logo.png" alt="Fizzle logo" />
-      <span>Fizzle</span>
+      <span>fizzle</span>
     </a>
+
     <nav class="links">
       <a href="#install">Install</a>
-      <a href="#use">How to Use</a>
+      <a href="#features">Features</a>
       <a href="#faq">FAQ</a>
     </nav>
-    <a class="btn mini" href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Download</a>
+
+    <div class="topbar-actions">
+      <a class="btn mini ghost" href="https://github.com/softlynn/Fizzle" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a class="btn mini" href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Download</a>
+    </div>
   </header>
 
   <main id="top" class="layout">
@@ -39,11 +46,13 @@
       <div class="hero-copy">
         <p class="tag">Windows Mic Effects</p>
         <h1>Sound better in seconds.</h1>
-        <p class="lead">Fizzle gives you a smooth, tray-friendly workflow for microphone processing with VST3 plugins, presets, low-latency routing, and Discord/LIVE-ready voice output.</p>
+        <p class="lead">Fizzle gives you a tray-friendly workflow for microphone processing with VST3 plugins, presets, low-latency routing, and clean voice output for calls and live sessions.</p>
+
         <div class="cta-row">
           <a id="downloadBtn" class="btn primary" href="https://github.com/softlynn/Fizzle/releases/latest" target="_blank" rel="noopener noreferrer">Get Latest Release</a>
-          <a class="btn ghost" href="https://github.com/softlynn/Fizzle" target="_blank" rel="noopener noreferrer">View GitHub</a>
+          <a class="btn ghost" href="https://github.com/softlynn/Fizzle" target="_blank" rel="noopener noreferrer">View Repository</a>
         </div>
+
         <div class="chip-row">
           <span class="chip">Tray-first</span>
           <span class="chip">Preset Ready</span>
@@ -53,25 +62,40 @@
         </div>
       </div>
 
-      <aside class="hero-card" id="tiltCard">
-        <div class="card-glow"></div>
-        <div class="card-head">
-          <img src="assets/logo.png" alt="Fizzle" />
-          <div>
-            <strong>Fizzle</strong>
-            <p>Realtime mic processing</p>
+      <aside class="hero-side">
+        <article class="hero-card" id="tiltCard">
+          <div class="card-glow"></div>
+          <div class="card-head">
+            <img src="assets/logo.png" alt="Fizzle" />
+            <div>
+              <strong>Fizzle Workflow</strong>
+              <p>Input → FX → Output</p>
+            </div>
           </div>
-        </div>
-        <ul>
-          <li><span>Input</span><strong>Your Microphone</strong></li>
-          <li><span>FX</span><strong>VST3 Chain + Presets</strong></li>
-          <li><span>Output</span><strong>Virtual Mic Device</strong></li>
-        </ul>
+          <ul>
+            <li><span>Input</span><strong>Your microphone</strong></li>
+            <li><span>FX Chain</span><strong>VST3 + presets</strong></li>
+            <li><span>Output</span><strong>Virtual mic device</strong></li>
+          </ul>
+        </article>
+
+        <article class="hero-card compact">
+          <div class="card-glow"></div>
+          <h3>Quick Start</h3>
+          <ol>
+            <li>Select your input mic</li>
+            <li>Pick your virtual output</li>
+            <li>Add plugins and save presets</li>
+          </ol>
+        </article>
       </aside>
     </section>
 
     <section id="install" class="panel reveal">
-      <h2>Install</h2>
+      <div class="panel-head">
+        <h2>Install</h2>
+        <span>Windows 11 ready</span>
+      </div>
       <div class="steps">
         <article>
           <span>1</span>
@@ -91,7 +115,7 @@
       </div>
     </section>
 
-    <section id="use" class="grid">
+    <section id="features" class="grid">
       <article class="card reveal">
         <h3>First Launch</h3>
         <p>Select your input mic, choose your virtual output, turn Effects On, and add your VST3 plugins.</p>
@@ -102,15 +126,19 @@
       </article>
       <article class="card reveal">
         <h3>Startup Controls</h3>
-        <p>Use Settings → Startup to launch with Windows, start in tray, and follow your app auto-enable state.</p>
+        <p>Use Settings → Startup to launch with Windows, start in tray, and follow app auto-enable state.</p>
       </article>
       <article class="card reveal">
         <h3>Smooth Control</h3>
         <p>Reorder plugins, adjust wet/dry, and keep a clean low-noise signal path.</p>
       </article>
       <article class="card reveal">
+        <h3>Monitoring</h3>
+        <p>Use Listen for local monitoring and quickly validate your chain before jumping into calls.</p>
+      </article>
+      <article class="card reveal">
         <h3>Troubleshooting</h3>
-        <p>If you hear crackles, raise buffer size. If apps don’t hear Fizzle, verify mic input selection inside that app.</p>
+        <p>If you hear crackles, raise buffer size. If apps don’t hear Fizzle, verify mic input selection in-app.</p>
       </article>
     </section>
 
@@ -149,6 +177,6 @@
     <span>MIT License</span>
   </footer>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

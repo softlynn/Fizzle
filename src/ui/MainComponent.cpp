@@ -3040,11 +3040,19 @@ PresetData MainComponent::buildCurrentPresetData(const juce::String& name)
         PluginPresetState state;
         state.identifier = plugin->description.fileOrIdentifier;
         state.name = plugin->description.name;
-        state.enabled = plugin->enabled;
-        state.mix = plugin->mix;
+        state.enabled = plugin->enabled.load();
+        state.mix = plugin->mix.load();
         juce::MemoryBlock block;
-        plugin->instance->getStateInformation(block);
-        state.base64State = block.toBase64Encoding();
+        try
+        {
+            plugin->instance->getStateInformation(block);
+            state.base64State = block.toBase64Encoding();
+        }
+        catch (...)
+        {
+            Logger::instance().log("Preset save: state capture failed for " + plugin->description.name);
+            state.base64State.clear();
+        }
         preset.plugins.add(state);
     }
     return preset;
@@ -3067,11 +3075,19 @@ juce::String MainComponent::buildCurrentPresetSnapshot()
             continue;
         auto pluginObj = new juce::DynamicObject();
         pluginObj->setProperty("identifier", plugin->description.fileOrIdentifier);
-        pluginObj->setProperty("enabled", plugin->enabled);
-        pluginObj->setProperty("mix", plugin->mix);
+        pluginObj->setProperty("enabled", plugin->enabled.load());
+        pluginObj->setProperty("mix", plugin->mix.load());
         juce::MemoryBlock block;
-        plugin->instance->getStateInformation(block);
-        pluginObj->setProperty("state", block.toBase64Encoding());
+        try
+        {
+            plugin->instance->getStateInformation(block);
+            pluginObj->setProperty("state", block.toBase64Encoding());
+        }
+        catch (...)
+        {
+            Logger::instance().log("Preset snapshot: state capture failed for " + plugin->description.name);
+            pluginObj->setProperty("state", {});
+        }
         pluginsArray.add(pluginObj);
     }
     obj->setProperty("plugins", pluginsArray);
@@ -3167,11 +3183,19 @@ void MainComponent::capturePluginSnapshotForUndo(int index)
         return;
 
     juce::MemoryBlock block;
-    plugin->instance->getStateInformation(block);
+    try
+    {
+        plugin->instance->getStateInformation(block);
+    }
+    catch (...)
+    {
+        Logger::instance().log("Undo capture failed for " + plugin->description.name);
+        return;
+    }
     lastRemovedPlugin.description = plugin->description;
     lastRemovedPlugin.base64State = block.toBase64Encoding();
-    lastRemovedPlugin.enabled = plugin->enabled;
-    lastRemovedPlugin.mix = plugin->mix;
+    lastRemovedPlugin.enabled = plugin->enabled.load();
+    lastRemovedPlugin.mix = plugin->mix.load();
     lastRemovedPlugin.index = index;
     lastRemovedPlugin.valid = true;
 }
@@ -3234,7 +3258,7 @@ void MainComponent::rowQuickActionMenu(int row, juce::Point<int> screenPosition)
         return;
 
     juce::PopupMenu m;
-    m.addItem(1, plugin->enabled ? "Disable" : "Enable");
+    m.addItem(1, plugin->enabled.load() ? "Disable" : "Enable");
     m.addItem(2, "Solo");
     m.addItem(3, "Remove");
 
@@ -3247,7 +3271,7 @@ void MainComponent::rowQuickActionMenu(int row, juce::Point<int> screenPosition)
         if (result == 1)
         {
             if (auto* p = safeThis->engine.getVstHost().getPlugin(row))
-                safeThis->setRowEnabled(row, ! p->enabled);
+                safeThis->setRowEnabled(row, ! p->enabled.load());
         }
         else if (result == 2)
         {
@@ -3319,8 +3343,8 @@ void MainComponent::loadPresetByName(const juce::String& name)
                     auto chain = engine.getVstHost().getChain();
                     if (auto* last = chain.getLast())
                     {
-                        last->enabled = p.enabled;
-                        last->mix = p.mix;
+                        last->enabled.store(p.enabled);
+                        last->mix.store(p.mix);
                     }
                 }
             }
@@ -4102,13 +4126,17 @@ juce::Component* MainComponent::refreshComponentForRow(int rowNumber, bool isRow
             [this](int r)
             {
                 if (auto* p = engine.getVstHost().getPlugin(r))
-                    setRowEnabled(r, ! p->enabled);
+                    setRowEnabled(r, ! p->enabled.load());
             },
             [this](int r, juce::Point<int> pt) { rowQuickActionMenu(r, pt); });
     }
 
     if (auto* plugin = engine.getVstHost().getPlugin(rowNumber))
-        row->setRowData(rowNumber, plugin->description.name, plugin->enabled, plugin->mix, isRowSelected);
+        row->setRowData(rowNumber,
+                        plugin->description.name,
+                        plugin->enabled.load(),
+                        plugin->mix.load(),
+                        isRowSelected);
 
     return row;
 }

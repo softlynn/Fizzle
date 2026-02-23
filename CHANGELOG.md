@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.1 - Stability Hardening (UI Freeze + VST Safety)
+
+### Fixed
+- Removed a major audio/UI lock contention path in the VST host that could freeze the UI (including tray/quit responsiveness) when plugins stalled.
+- Refactored VST processing to use a chain snapshot so the audio callback no longer holds the shared chain lock while plugins process.
+- Hardened plugin state capture for preset save/load snapshots and undo-remove to avoid crashes from plugins throwing during state serialization.
+- Added safer plugin processing failure handling: plugins that fail during processing are disabled and logged instead of destabilizing the app.
+
+### Changed
+- VST enabled/mix state is now stored atomically for safer concurrent UI/audio access.
+- Plugin latency reporting is now cached and refreshed on chain changes, reducing work on the realtime path.
+
 ## v0.1.9 - Transparency + Settings Scroll + Performance
 
 ### Fixed

@@ -22,6 +22,67 @@ VstHost::VstHost()
     formatManager.addDefaultFormats();
 }
 
+bool VstHost::createHostedPlugin(const juce::PluginDescription& description,
+                                 double sampleRate,
+                                 int blockSize,
+                                 juce::String& error,
+                                 HostedPluginPtr& outHosted)
+{
+    auto* vst3Format = getVst3Format(formatManager);
+    if (vst3Format == nullptr)
+    {
+        error = "VST3 format unavailable";
+        return false;
+    }
+
+    juce::OwnedArray<juce::PluginDescription> types;
+    vst3Format->findAllTypesForFile(types, description.fileOrIdentifier);
+    if (types.isEmpty())
+    {
+        error = "Could not load plugin description from: " + description.fileOrIdentifier;
+        return false;
+    }
+
+    auto resolved = *types[0];
+    auto result = formatManager.createPluginInstance(resolved, sampleRate, blockSize, error);
+    if (result == nullptr)
+        return false;
+
+    auto hosted = std::make_shared<HostedPlugin>();
+    hosted->description = resolved;
+    hosted->instance.reset(result.release());
+    hosted->instance->prepareToPlay(sampleRate, blockSize);
+    outHosted = std::move(hosted);
+    return true;
+}
+
+std::vector<VstHost::HostedPluginPtr> VstHost::copyChainSnapshot() const
+{
+    const juce::ScopedLock sl(chainLock);
+    return chain;
+}
+
+void VstHost::refreshLatencyCacheLocked()
+{
+    int total = 0;
+    for (const auto& plugin : chain)
+    {
+        if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load())
+            continue;
+
+        try
+        {
+            total += plugin->instance->getLatencySamples();
+        }
+        catch (...)
+        {
+            Logger::instance().log("VST latency query failed for " + plugin->description.name);
+        }
+    }
+
+    cachedLatencySamples.store(total);
+}
+
 juce::StringArray VstHost::scanFolder(const juce::File& folder)
 {
     juce::StringArray found;
@@ -97,34 +158,13 @@ void VstHost::importScannedPaths(const juce::StringArray& paths)
 
 bool VstHost::addPlugin(const juce::PluginDescription& description, double sampleRate, int blockSize, juce::String& error)
 {
-    auto* vst3Format = getVst3Format(formatManager);
-    if (vst3Format == nullptr)
-    {
-        error = "VST3 format unavailable";
+    HostedPluginPtr hosted;
+    if (! createHostedPlugin(description, sampleRate, blockSize, error, hosted))
         return false;
-    }
-
-    juce::OwnedArray<juce::PluginDescription> types;
-    vst3Format->findAllTypesForFile(types, description.fileOrIdentifier);
-    if (types.isEmpty())
-    {
-        error = "Could not load plugin description from: " + description.fileOrIdentifier;
-        return false;
-    }
-
-    auto resolved = *types[0];
-    auto result = formatManager.createPluginInstance(resolved, sampleRate, blockSize, error);
-    if (result == nullptr)
-        return false;
-
-    std::unique_ptr<juce::AudioPluginInstance> instance(result.release());
-    instance->prepareToPlay(sampleRate, blockSize);
 
     const juce::ScopedLock sl(chainLock);
-    auto* hosted = new HostedPlugin();
-    hosted->description = resolved;
-    hosted->instance = std::move(instance);
-    chain.add(hosted);
+    chain.push_back(std::move(hosted));
+    refreshLatencyCacheLocked();
     return true;
 }
 
@@ -134,7 +174,8 @@ bool VstHost::addPluginWithState(const juce::PluginDescription& description,
                                  const juce::String& base64State,
                                  juce::String& error)
 {
-    if (! addPlugin(description, sampleRate, blockSize, error))
+    HostedPluginPtr hosted;
+    if (! createHostedPlugin(description, sampleRate, blockSize, error, hosted))
         return false;
 
     if (base64State.isNotEmpty())
@@ -142,10 +183,22 @@ bool VstHost::addPluginWithState(const juce::PluginDescription& description,
         juce::MemoryBlock state;
         if (state.fromBase64Encoding(base64State))
         {
-            const juce::ScopedLock sl(chainLock);
-            if (auto* plugin = chain.getLast())
-                plugin->instance->setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+            try
+            {
+                if (hosted->instance != nullptr)
+                    hosted->instance->setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+            }
+            catch (...)
+            {
+                Logger::instance().log("VST state restore failed for " + hosted->description.name);
+            }
         }
+    }
+
+    {
+        const juce::ScopedLock sl(chainLock);
+        chain.push_back(std::move(hosted));
+        refreshLatencyCacheLocked();
     }
 
     return true;
@@ -170,50 +223,66 @@ bool VstHost::findDescriptionByIdentifier(const juce::String& identifier, juce::
 void VstHost::removePlugin(int index)
 {
     const juce::ScopedLock sl(chainLock);
-    if (juce::isPositiveAndBelow(index, chain.size()))
-        chain.remove(index);
+    if (! juce::isPositiveAndBelow(index, static_cast<int>(chain.size())))
+        return;
+
+    chain.erase(chain.begin() + index);
+    refreshLatencyCacheLocked();
 }
 
 void VstHost::movePlugin(int from, int to)
 {
     const juce::ScopedLock sl(chainLock);
-    if (juce::isPositiveAndBelow(from, chain.size()) && juce::isPositiveAndBelow(to, chain.size()))
-        chain.move(from, to);
+    if (! juce::isPositiveAndBelow(from, static_cast<int>(chain.size()))
+        || ! juce::isPositiveAndBelow(to, static_cast<int>(chain.size()))
+        || from == to)
+        return;
+
+    auto item = std::move(chain[static_cast<size_t>(from)]);
+    chain.erase(chain.begin() + from);
+    chain.insert(chain.begin() + to, std::move(item));
 }
 
 void VstHost::swapPlugin(int first, int second)
 {
     const juce::ScopedLock sl(chainLock);
-    if (! juce::isPositiveAndBelow(first, chain.size())
-        || ! juce::isPositiveAndBelow(second, chain.size())
+    if (! juce::isPositiveAndBelow(first, static_cast<int>(chain.size()))
+        || ! juce::isPositiveAndBelow(second, static_cast<int>(chain.size()))
         || first == second)
         return;
 
-    chain.swap(first, second);
+    std::swap(chain[static_cast<size_t>(first)], chain[static_cast<size_t>(second)]);
 }
 
 void VstHost::setEnabled(int index, bool enabled)
 {
+    HostedPluginPtr target;
     const juce::ScopedLock sl(chainLock);
-    if (juce::isPositiveAndBelow(index, chain.size()))
-        if (auto* p = chain[index])
-        p->enabled = enabled;
+    if (! juce::isPositiveAndBelow(index, static_cast<int>(chain.size())))
+        return;
+
+    target = chain[static_cast<size_t>(index)];
+    if (target != nullptr)
+        target->enabled.store(enabled);
+    refreshLatencyCacheLocked();
 }
 
 void VstHost::setMix(int index, float mix)
 {
     const juce::ScopedLock sl(chainLock);
-    if (juce::isPositiveAndBelow(index, chain.size()))
-        if (auto* p = chain[index])
-        p->mix = juce::jlimit(0.0f, 1.0f, mix);
+    if (! juce::isPositiveAndBelow(index, static_cast<int>(chain.size())))
+        return;
+
+    if (auto& p = chain[static_cast<size_t>(index)])
+        p->mix.store(juce::jlimit(0.0f, 1.0f, mix));
 }
 
 float VstHost::getMix(int index) const
 {
     const juce::ScopedLock sl(chainLock);
-    if (juce::isPositiveAndBelow(index, chain.size()))
-        if (auto* p = chain[index])
-        return p->mix;
+    if (juce::isPositiveAndBelow(index, static_cast<int>(chain.size())))
+        if (auto& p = chain[static_cast<size_t>(index)])
+            return p->mix.load();
     return 1.0f;
 }
 
@@ -221,24 +290,40 @@ void VstHost::clear()
 {
     const juce::ScopedLock sl(chainLock);
     chain.clear();
+    cachedLatencySamples.store(0);
 }
 
 void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
 {
-    const juce::ScopedLock sl(chainLock);
+    const auto snapshot = copyChainSnapshot();
+    if (snapshot.empty())
+        return;
 
     juce::MidiBuffer midi;
-    wetBuffer.setSize(buffer.getNumChannels(), buffer.getNumSamples(), false, false, true);
-
-    for (auto* plugin : chain)
+    if (wetBuffer.getNumChannels() != buffer.getNumChannels()
+        || wetBuffer.getNumSamples() != buffer.getNumSamples())
     {
-        if (plugin == nullptr || ! plugin->enabled || plugin->instance == nullptr)
+        wetBuffer.setSize(buffer.getNumChannels(), buffer.getNumSamples(), false, false, true);
+    }
+
+    for (const auto& plugin : snapshot)
+    {
+        if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load())
             continue;
 
         wetBuffer.makeCopyOf(buffer, true);
-        plugin->instance->processBlock(wetBuffer, midi);
+        try
+        {
+            plugin->instance->processBlock(wetBuffer, midi);
+        }
+        catch (...)
+        {
+            plugin->enabled.store(false);
+            Logger::instance().log("VST process failed for " + plugin->description.name + " (disabled)");
+            continue;
+        }
 
-        const auto mix = juce::jlimit(0.0f, 1.0f, plugin->mix);
+        const auto mix = juce::jlimit(0.0f, 1.0f, plugin->mix.load());
         const auto inv = 1.0f - mix;
         for (int c = 0; c < buffer.getNumChannels(); ++c)
         {
@@ -252,35 +337,31 @@ void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
 
 int VstHost::getLatencySamples() const
 {
-    const juce::ScopedLock sl(chainLock);
-    int total = 0;
-    for (auto* plugin : chain)
-    {
-        if (plugin != nullptr && plugin->enabled && plugin->instance != nullptr)
-            total += plugin->instance->getLatencySamples();
-    }
-    return total;
+    return cachedLatencySamples.load();
 }
 
 juce::Array<HostedPlugin*> VstHost::getChain()
 {
     const juce::ScopedLock sl(chainLock);
     juce::Array<HostedPlugin*> out;
-    for (auto* p : chain)
-        out.add(p);
+    out.ensureStorageAllocated(static_cast<int>(chain.size()));
+    for (const auto& p : chain)
+        out.add(p.get());
     return out;
 }
 
 HostedPlugin* VstHost::getPlugin(int index)
 {
     const juce::ScopedLock sl(chainLock);
-    return juce::isPositiveAndBelow(index, chain.size()) ? chain[index] : nullptr;
+    return juce::isPositiveAndBelow(index, static_cast<int>(chain.size()))
+         ? chain[static_cast<size_t>(index)].get()
+         : nullptr;
 }
 
 void VstHost::prepare(double sampleRate, int blockSize)
 {
-    const juce::ScopedLock sl(chainLock);
-    for (auto* plugin : chain)
+    const auto snapshot = copyChainSnapshot();
+    for (const auto& plugin : snapshot)
     {
         if (plugin == nullptr || plugin->instance == nullptr)
             continue;
@@ -294,12 +375,15 @@ void VstHost::prepare(double sampleRate, int blockSize)
             Logger::instance().log("VST prepare failed for " + plugin->description.name);
         }
     }
+
+    const juce::ScopedLock sl(chainLock);
+    refreshLatencyCacheLocked();
 }
 
 void VstHost::release()
 {
-    const juce::ScopedLock sl(chainLock);
-    for (auto* plugin : chain)
+    const auto snapshot = copyChainSnapshot();
+    for (const auto& plugin : snapshot)
     {
         if (plugin == nullptr || plugin->instance == nullptr)
             continue;

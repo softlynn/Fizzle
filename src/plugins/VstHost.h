@@ -1,6 +1,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
+#include <memory>
+#include <vector>
 
 namespace fizzle
 {
@@ -8,8 +11,8 @@ struct HostedPlugin
 {
     juce::PluginDescription description;
     std::unique_ptr<juce::AudioPluginInstance> instance;
-    bool enabled { true };
-    float mix { 1.0f };
+    std::atomic<bool> enabled { true };
+    std::atomic<float> mix { 1.0f };
 };
 
 class VstHost
@@ -41,6 +44,8 @@ public:
     void release();
 
 private:
+    using HostedPluginPtr = std::shared_ptr<HostedPlugin>;
+
     struct ScannedEntry
     {
         juce::String name;
@@ -48,10 +53,19 @@ private:
     };
 
     juce::AudioPluginFormatManager formatManager;
-    juce::CriticalSection chainLock;
-    juce::OwnedArray<HostedPlugin> chain;
+    mutable juce::CriticalSection chainLock;
+    std::vector<HostedPluginPtr> chain;
     juce::Array<ScannedEntry> scanned;
     juce::AudioBuffer<float> wetBuffer;
+    std::atomic<int> cachedLatencySamples { 0 };
+
+    bool createHostedPlugin(const juce::PluginDescription& description,
+                            double sampleRate,
+                            int blockSize,
+                            juce::String& error,
+                            HostedPluginPtr& outHosted);
+    std::vector<HostedPluginPtr> copyChainSnapshot() const;
+    void refreshLatencyCacheLocked();
 
 public:
     void setMix(int index, float mix);
