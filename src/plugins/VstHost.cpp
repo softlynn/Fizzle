@@ -72,6 +72,7 @@ void VstHost::refreshLatencyCacheLocked()
 
         try
         {
+            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
             total += plugin->instance->getLatencySamples();
         }
         catch (...)
@@ -311,6 +312,10 @@ void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
         if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load())
             continue;
 
+        const juce::SpinLock::ScopedTryLockType lock(plugin->callbackLock);
+        if (! lock.isLocked())
+            continue;
+
         wetBuffer.makeCopyOf(buffer, true);
         try
         {
@@ -358,6 +363,19 @@ HostedPlugin* VstHost::getPlugin(int index)
          : nullptr;
 }
 
+VstHost::HostedPluginHandle VstHost::getPluginHandle(int index)
+{
+    const juce::ScopedLock sl(chainLock);
+    return juce::isPositiveAndBelow(index, static_cast<int>(chain.size()))
+         ? chain[static_cast<size_t>(index)]
+         : HostedPluginHandle{};
+}
+
+std::vector<VstHost::HostedPluginHandle> VstHost::getChainHandles() const
+{
+    return copyChainSnapshot();
+}
+
 void VstHost::prepare(double sampleRate, int blockSize)
 {
     const auto snapshot = copyChainSnapshot();
@@ -367,6 +385,7 @@ void VstHost::prepare(double sampleRate, int blockSize)
             continue;
         try
         {
+            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
             plugin->instance->releaseResources();
             plugin->instance->prepareToPlay(sampleRate, blockSize);
         }
@@ -389,6 +408,7 @@ void VstHost::release()
             continue;
         try
         {
+            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
             plugin->instance->releaseResources();
         }
         catch (...)

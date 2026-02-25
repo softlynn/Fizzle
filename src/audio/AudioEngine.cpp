@@ -13,7 +13,9 @@ AudioEngine::~AudioEngine()
 
 bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
 {
+    const auto previousSettings = settings;
     settings = requested;
+    deviceReconfiguring.store(true);
 
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     if (! deviceManagerInitialised)
@@ -21,6 +23,8 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         const auto initError = deviceManager.initialise(2, 2, nullptr, true, {}, nullptr);
         if (initError.isNotEmpty())
         {
+            settings = previousSettings;
+            deviceReconfiguring.store(false);
             error = initError;
             Logger::instance().log("Audio device manager init failed: " + initError);
             return false;
@@ -78,6 +82,8 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         result = deviceManager.setAudioDeviceSetup(setup, true);
         if (result.isNotEmpty())
         {
+            settings = previousSettings;
+            deviceReconfiguring.store(false);
             error = result;
             Logger::instance().log("Audio setup failed: " + result);
             return false;
@@ -98,14 +104,17 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
     if (listenEnabled.load() && monitorOutputDevice.isNotEmpty())
         setListenEnabled(true);
 
+    deviceReconfiguring.store(false);
     Logger::instance().log("Audio engine started");
     return true;
 }
 
 void AudioEngine::stop()
 {
+    deviceReconfiguring.store(true);
     deviceManager.removeAudioCallback(this);
     deviceManager.closeAudioDevice();
+    deviceReconfiguring.store(false);
 }
 
 void AudioEngine::setMonitorOutputDevice(const juce::String& name)
@@ -199,6 +208,18 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
                                                    int numSamples,
                                                    const juce::AudioIODeviceCallbackContext&)
 {
+    const juce::SpinLock::ScopedTryLockType ioLock(ioCallbackLock);
+    if (! ioLock.isLocked() || deviceReconfiguring.load())
+    {
+        if (outputChannelData != nullptr && numSamples > 0)
+        {
+            for (int ch = 0; ch < numOutputChannels; ++ch)
+                if (outputChannelData[ch] != nullptr)
+                    juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+        }
+        return;
+    }
+
     const auto tick = juce::Time::getHighResolutionTicks();
 
     if (numSamples <= 0 || outputChannelData == nullptr)
@@ -311,6 +332,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 {
+    const juce::SpinLock::ScopedLockType ioLock(ioCallbackLock);
     const auto rawRate = device != nullptr ? device->getCurrentSampleRate() : kInternalSampleRate;
     const auto sampleRate = rawRate > 1000.0 ? rawRate : kInternalSampleRate;
     const auto deviceBuffer = device != nullptr ? juce::jmax(1, device->getCurrentBufferSizeSamples()) : 256;
@@ -338,6 +360,7 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 
 void AudioEngine::audioDeviceStopped()
 {
+    const juce::SpinLock::ScopedLockType ioLock(ioCallbackLock);
     chain.reset();
     vstHost.release();
     Logger::instance().log("Audio device stopped");

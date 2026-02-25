@@ -89,6 +89,8 @@ private:
     juce::AudioBuffer<float> inBuffer;
     juce::AudioBuffer<float> internalBuffer;
     juce::AudioBuffer<float> outBuffer;
+    juce::SpinLock ioCallbackLock;
+    std::atomic<bool> deviceReconfiguring { false };
 
     Resampler resampler;
 

@@ -622,8 +622,11 @@ private:
 class PluginEditorWindow final : public juce::DocumentWindow
 {
 public:
-    explicit PluginEditorWindow(juce::AudioProcessorEditor* editor, std::function<void()> onCloseFn)
+    explicit PluginEditorWindow(juce::AudioProcessorEditor* editor,
+                                std::shared_ptr<HostedPlugin> pluginHandleToKeepAlive,
+                                std::function<void()> onCloseFn)
         : juce::DocumentWindow("Plugin Editor", juce::Colour(0xff0f141d), juce::DocumentWindow::closeButton)
+        , pluginHandle(std::move(pluginHandleToKeepAlive))
         , onClose(std::move(onCloseFn))
     {
         setUsingNativeTitleBar(true);
@@ -640,6 +643,7 @@ public:
     }
 
 private:
+    std::shared_ptr<HostedPlugin> pluginHandle;
     std::function<void()> onClose;
 };
 
@@ -2377,7 +2381,7 @@ void MainComponent::rowOpenEditor(int row)
 
     closePluginEditorWindow();
 
-    if (auto* hosted = engine.getVstHost().getPlugin(row))
+    if (auto hosted = engine.getVstHost().getPluginHandle(row))
     {
         auto* instance = hosted->instance.get();
         if (instance == nullptr)
@@ -2394,6 +2398,7 @@ void MainComponent::rowOpenEditor(int row)
         juce::AudioProcessorEditor* editor = nullptr;
         try
         {
+            const juce::SpinLock::ScopedLockType lock(hosted->callbackLock);
             editor = instance->createEditorIfNeeded();
         }
         catch (...)
@@ -2413,7 +2418,7 @@ void MainComponent::rowOpenEditor(int row)
         }
 
         juce::Component::SafePointer<MainComponent> safeThis(this);
-        pluginEditorWindow = std::make_unique<PluginEditorWindow>(editor, [safeThis]
+        pluginEditorWindow = std::make_unique<PluginEditorWindow>(editor, std::move(hosted), [safeThis]
         {
             if (safeThis != nullptr)
                 safeThis->closePluginEditorWindow();
@@ -2537,6 +2542,7 @@ void MainComponent::runAudioRestartWithOverlay(bool fromTray)
         if (safeThis == nullptr)
             return;
 
+        safeThis->closePluginEditorWindow();
         juce::String error;
         safeThis->engine.restartAudio(error);
         safeThis->loadDeviceLists();
@@ -3032,7 +3038,7 @@ PresetData MainComponent::buildCurrentPresetData(const juce::String& name)
     preset.name = name;
     preset.engine = engine.currentSettings();
     preset.values["outputGainDb"] = params.outputGainDb.load();
-    for (auto* plugin : engine.getVstHost().getChain())
+    for (auto plugin : engine.getVstHost().getChainHandles())
     {
         if (plugin == nullptr || plugin->instance == nullptr)
             continue;
@@ -3045,6 +3051,7 @@ PresetData MainComponent::buildCurrentPresetData(const juce::String& name)
         juce::MemoryBlock block;
         try
         {
+            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
             plugin->instance->getStateInformation(block);
             state.base64State = block.toBase64Encoding();
         }
@@ -3069,7 +3076,7 @@ juce::String MainComponent::buildCurrentPresetSnapshot()
     obj->setProperty("outputGainDb", params.outputGainDb.load());
 
     juce::Array<juce::var> pluginsArray;
-    for (auto* plugin : engine.getVstHost().getChain())
+    for (auto plugin : engine.getVstHost().getChainHandles())
     {
         if (plugin == nullptr || plugin->instance == nullptr)
             continue;
@@ -3080,6 +3087,7 @@ juce::String MainComponent::buildCurrentPresetSnapshot()
         juce::MemoryBlock block;
         try
         {
+            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
             plugin->instance->getStateInformation(block);
             pluginObj->setProperty("state", block.toBase64Encoding());
         }
@@ -3178,13 +3186,14 @@ void MainComponent::capturePluginSnapshotForUndo(int index)
     lastRemovedPlugin = {};
     if (! juce::isPositiveAndBelow(index, getNumRows()))
         return;
-    auto* plugin = engine.getVstHost().getPlugin(index);
+    auto plugin = engine.getVstHost().getPluginHandle(index);
     if (plugin == nullptr || plugin->instance == nullptr)
         return;
 
     juce::MemoryBlock block;
     try
     {
+        const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
         plugin->instance->getStateInformation(block);
     }
     catch (...)
@@ -3312,13 +3321,16 @@ void MainComponent::loadPresetByName(const juce::String& name)
         }
         syncBufferBoxSelection(bufferBox, engineSettings.bufferSize);
 
+        closePluginEditorWindow();
         juce::String startError;
         if (! engine.start(engineSettings, startError))
             Logger::instance().log("Preset audio apply failed: " + startError);
-        cachedSettings.inputDeviceName = engineSettings.inputDeviceName;
-        cachedSettings.outputDeviceName = engineSettings.outputDeviceName;
-        cachedSettings.bufferSize = engineSettings.bufferSize;
-        cachedSettings.preferredSampleRate = engineSettings.preferredSampleRate;
+
+        const auto appliedSettings = engine.currentSettings();
+        cachedSettings.inputDeviceName = appliedSettings.inputDeviceName;
+        cachedSettings.outputDeviceName = appliedSettings.outputDeviceName;
+        cachedSettings.bufferSize = appliedSettings.bufferSize;
+        cachedSettings.preferredSampleRate = appliedSettings.preferredSampleRate;
         saveCachedSettings();
 
         if (const auto it = preset->values.find("outputGainDb"); it != preset->values.end())
@@ -3327,7 +3339,6 @@ void MainComponent::loadPresetByName(const juce::String& name)
             outputGain.setValue(it->second, juce::dontSendNotification);
         }
 
-        closePluginEditorWindow();
         engine.getVstHost().clear();
         juce::String error;
         const auto d = engine.getDiagnostics();
@@ -3355,6 +3366,7 @@ void MainComponent::loadPresetByName(const juce::String& name)
         persistLastPresetName(currentPresetName);
         currentPresetLabel.setText("Current: " + currentPresetName, juce::dontSendNotification);
         presetBox.setText(currentPresetName, juce::dontSendNotification);
+        loadDeviceLists();
         refreshPluginChainUi();
         markCurrentPresetSnapshot();
     }

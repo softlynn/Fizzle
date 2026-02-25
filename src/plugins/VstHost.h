@@ -13,11 +13,14 @@ struct HostedPlugin
     std::unique_ptr<juce::AudioPluginInstance> instance;
     std::atomic<bool> enabled { true };
     std::atomic<float> mix { 1.0f };
+    juce::SpinLock callbackLock;
 };
 
 class VstHost
 {
 public:
+    using HostedPluginHandle = std::shared_ptr<HostedPlugin>;
+
     VstHost();
 
     juce::StringArray scanFolder(const juce::File& folder);
@@ -40,11 +43,13 @@ public:
     void processBlock(juce::AudioBuffer<float>& buffer);
     juce::Array<HostedPlugin*> getChain();
     HostedPlugin* getPlugin(int index);
+    HostedPluginHandle getPluginHandle(int index);
+    std::vector<HostedPluginHandle> getChainHandles() const;
     void prepare(double sampleRate, int blockSize);
     void release();
 
 private:
-    using HostedPluginPtr = std::shared_ptr<HostedPlugin>;
+    using HostedPluginPtr = HostedPluginHandle;
 
     struct ScannedEntry
     {

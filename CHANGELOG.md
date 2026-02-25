@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.2 - Device Switch + VST Crash Hardening
+
+### Fixed
+- Hardened audio device reconfigure flow to prevent callback/lifecycle overlap during input-device switches (including Antlion ModMic selection).
+- Added VST plugin instance synchronization around process/prepare/release/editor/state calls to reduce plugin access violations during audio restart and device changes.
+- Plugin editor windows now retain plugin lifetime while open and are forcibly closed before audio restart to avoid stale editor/plugin references.
+- Preset device-apply now persists the *applied* engine settings after fallback/failure instead of saving invalid requested device names.
+- Reduced repeated startup bad-state loops caused by stale missing-device names in presets/settings.
+
 ## v0.2.1 - Stability Hardening (UI Freeze + VST Safety)
 
 ### Fixed
