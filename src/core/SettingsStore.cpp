@@ -37,6 +37,9 @@ EngineSettings fromVar(const juce::var& data)
             out.autoInstallUpdates = static_cast<bool>(obj->getProperty("autoDownloadUpdates"));
         else
             out.autoInstallUpdates = false;
+        out.autoSaveDraftRecovery = obj->hasProperty("autoSaveDraftRecovery")
+                                        ? static_cast<bool>(obj->getProperty("autoSaveDraftRecovery"))
+                                        : true;
         out.startWithWindows = obj->hasProperty("startWithWindows")
                                    ? static_cast<bool>(obj->getProperty("startWithWindows"))
                                    : false;
@@ -95,6 +98,7 @@ juce::var toVar(const EngineSettings& settings)
     obj->setProperty("autoInstallUpdates", settings.autoInstallUpdates);
     // Keep legacy key for backward compatibility across older builds.
     obj->setProperty("autoDownloadUpdates", settings.autoInstallUpdates);
+    obj->setProperty("autoSaveDraftRecovery", settings.autoSaveDraftRecovery);
     obj->setProperty("startWithWindows", settings.startWithWindows);
     obj->setProperty("startMinimizedToTray", settings.startMinimizedToTray);
     obj->setProperty("followAutoEnableWindowState", settings.followAutoEnableWindowState);

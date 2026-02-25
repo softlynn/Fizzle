@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.3 - Autosave Recovery Drafts
+
+### Added
+- New Settings > Updates toggle: `Auto-save recovery drafts`.
+- Automatic recovery draft save for unsaved preset/VST changes, with startup prompt to restore as a new preset after a crash/freeze/forced close.
+
+### Changed
+- Forces a recovery draft save before risky audio operations (device reconfigure / restart audio) to improve recovery odds.
+
 ## v0.2.2 - Device Switch + VST Crash Hardening
 
 ### Fixed

@@ -111,6 +111,7 @@ private:
     juce::TextButton removeProgramButton { "Remove Selected" };
     juce::TextButton closeSettingsButton { "Close" };
     juce::ToggleButton autoDownloadUpdatesToggle { "Auto-install new updates" };
+    juce::ToggleButton autoSaveDraftToggle { "Auto-save recovery drafts" };
     juce::TextButton checkUpdatesButton { "Check Now" };
     juce::TextButton updatesGithubButton { "Open GitHub Repo" };
     juce::TextButton updatesWebsiteButton { "Open Website" };
@@ -208,6 +209,9 @@ private:
     int settingsScrollMax { 0 };
     int uiTimerHz { 30 };
     float uiScale { 1.0f };
+    juce::uint32 appStartMs { 0 };
+    juce::uint32 lastDraftAutosaveCheckMs { 0 };
+    juce::String lastAutosaveDraftFingerprint;
     struct FizzBubble
     {
         juce::Point<float> pos;
@@ -279,6 +283,11 @@ private:
     void markCurrentPresetSnapshot();
     juce::String loadPersistedLastPresetName() const;
     void persistLastPresetName(const juce::String& presetName) const;
+    juce::File getAutosaveDraftFile() const;
+    void saveAutosaveDraftIfNeeded(bool force);
+    void clearAutosaveDraft();
+    bool loadAutosaveDraftToRecoveredPreset(juce::String& recoveredPresetName);
+    void promptRestoreAutosaveDraftIfAvailable();
     void loadPresetByName(const juce::String& name);
     void setUpdateStatus(const juce::String& text, bool warning = false);
     void triggerUpdateCheck(bool manualTrigger);

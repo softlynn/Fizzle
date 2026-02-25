@@ -6,6 +6,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <thread>
 #if JUCE_WINDOWS
 #include <windows.h>
@@ -127,6 +128,74 @@ int compareSemver(const juce::String& lhs, const juce::String& rhs)
             return va < vb ? -1 : 1;
     }
     return 0;
+}
+
+juce::var presetDataToJsonVar(const PresetData& preset)
+{
+    auto root = new juce::DynamicObject();
+    root->setProperty("name", preset.name);
+    root->setProperty("inputDevice", preset.engine.inputDeviceName);
+    root->setProperty("outputDevice", preset.engine.outputDeviceName);
+    root->setProperty("bufferSize", preset.engine.bufferSize);
+    root->setProperty("sampleRate", preset.engine.preferredSampleRate);
+
+    auto valuesObj = new juce::DynamicObject();
+    for (const auto& [key, value] : preset.values)
+        valuesObj->setProperty(key, value);
+    root->setProperty("values", valuesObj);
+
+    juce::Array<juce::var> pluginsArray;
+    for (const auto& plugin : preset.plugins)
+    {
+        auto pluginObj = new juce::DynamicObject();
+        pluginObj->setProperty("identifier", plugin.identifier);
+        pluginObj->setProperty("name", plugin.name);
+        pluginObj->setProperty("enabled", plugin.enabled);
+        pluginObj->setProperty("mix", plugin.mix);
+        pluginObj->setProperty("state", plugin.base64State);
+        pluginsArray.add(pluginObj);
+    }
+    root->setProperty("plugins", pluginsArray);
+    return juce::var(root);
+}
+
+bool presetDataFromJsonVar(const juce::var& parsed, PresetData& out)
+{
+    auto* obj = parsed.getDynamicObject();
+    if (obj == nullptr)
+        return false;
+
+    out = {};
+    out.name = obj->getProperty("name").toString();
+    out.engine.inputDeviceName = obj->getProperty("inputDevice").toString();
+    out.engine.outputDeviceName = obj->getProperty("outputDevice").toString();
+    out.engine.bufferSize = obj->hasProperty("bufferSize") ? static_cast<int>(obj->getProperty("bufferSize")) : kDefaultBlockSize;
+    out.engine.preferredSampleRate = obj->hasProperty("sampleRate") ? static_cast<double>(obj->getProperty("sampleRate")) : kInternalSampleRate;
+
+    if (auto* values = obj->getProperty("values").getDynamicObject())
+    {
+        for (const auto& p : values->getProperties())
+            out.values[p.name.toString()] = static_cast<float>(p.value);
+    }
+
+    if (auto* plugins = obj->getProperty("plugins").getArray())
+    {
+        for (const auto& p : *plugins)
+        {
+            if (auto* po = p.getDynamicObject())
+            {
+                PluginPresetState state;
+                state.identifier = po->getProperty("identifier").toString();
+                state.name = po->getProperty("name").toString();
+                state.enabled = po->hasProperty("enabled") ? static_cast<bool>(po->getProperty("enabled")) : true;
+                state.mix = po->hasProperty("mix") ? static_cast<float>(po->getProperty("mix")) : 1.0f;
+                state.base64State = po->getProperty("state").toString();
+                out.plugins.add(state);
+            }
+        }
+    }
+
+    return true;
 }
 
 #if JUCE_WINDOWS
@@ -1088,6 +1157,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsNavStartupButton.setToggleState(false, juce::dontSendNotification);
     autoEnableToggle.setButtonText("Auto Enable by Program");
     autoDownloadUpdatesToggle.setButtonText("Auto-install new updates");
+    autoSaveDraftToggle.setButtonText("Auto-save recovery drafts");
     startWithWindowsToggle.setButtonText("Start with Windows");
     startMinimizedToggle.setButtonText("Start minimized to tray");
     followAutoEnableWindowToggle.setButtonText("Open/close window with Program Auto-Enable");
@@ -1125,6 +1195,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     autoEnableToggle.addListener(this);
     refreshAppsButton.addListener(this);
     autoDownloadUpdatesToggle.addListener(this);
+    autoSaveDraftToggle.addListener(this);
     lightModeToggle.addListener(this);
     checkUpdatesButton.addListener(this);
     settingsNavAutoEnableButton.addListener(this);
@@ -1277,6 +1348,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(removeProgramButton);
     settingsPanel->addAndMakeVisible(updatesLabel);
     settingsPanel->addAndMakeVisible(autoDownloadUpdatesToggle);
+    settingsPanel->addAndMakeVisible(autoSaveDraftToggle);
     settingsPanel->addAndMakeVisible(checkUpdatesButton);
     settingsPanel->addAndMakeVisible(updatesLinksLabel);
     settingsPanel->addAndMakeVisible(updatesGithubButton);
@@ -1350,6 +1422,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     }
     autoEnableToggle.setToggleState(cachedSettings.autoEnableByApp, juce::dontSendNotification);
     autoDownloadUpdatesToggle.setToggleState(cachedSettings.autoInstallUpdates, juce::dontSendNotification);
+    autoSaveDraftToggle.setToggleState(cachedSettings.autoSaveDraftRecovery, juce::dontSendNotification);
     lightModeToggle.setToggleState(cachedSettings.lightMode, juce::dontSendNotification);
     appearanceThemeBox.setSelectedId(cachedSettings.themeVariant + 1, juce::dontSendNotification);
     appearanceBackgroundBox.setSelectedId(cachedSettings.transparentBackground ? 1 : 2, juce::dontSendNotification);
@@ -1400,6 +1473,14 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
                 safeThis->triggerUpdateCheck(false);
         });
     }
+
+    appStartMs = juce::Time::getMillisecondCounter();
+    juce::Component::SafePointer<MainComponent> safePrompt(this);
+    juce::Timer::callAfterDelay(900, [safePrompt]
+    {
+        if (safePrompt != nullptr)
+            safePrompt->promptRestoreAutosaveDraftIfAvailable();
+    });
 
     uiTimerHz = 30;
     startTimerHz(uiTimerHz);
@@ -1950,6 +2031,7 @@ void MainComponent::updateSettingsTabVisibility()
 
     for (auto* c : { static_cast<juce::Component*>(&updatesLabel),
                      static_cast<juce::Component*>(&autoDownloadUpdatesToggle),
+                     static_cast<juce::Component*>(&autoSaveDraftToggle),
                      static_cast<juce::Component*>(&checkUpdatesButton),
                      static_cast<juce::Component*>(&updateStatusLabel),
                      static_cast<juce::Component*>(&updatesLinksLabel),
@@ -2313,6 +2395,7 @@ void MainComponent::applySettingsFromControls()
         && s.bufferSize == previous.bufferSize)
         return;
 
+    saveAutosaveDraftIfNeeded(true);
     juce::String error;
     closePluginEditorWindow();
     if (! engine.start(s, error))
@@ -2542,6 +2625,7 @@ void MainComponent::runAudioRestartWithOverlay(bool fromTray)
         if (safeThis == nullptr)
             return;
 
+        safeThis->saveAutosaveDraftIfNeeded(true);
         safeThis->closePluginEditorWindow();
         juce::String error;
         safeThis->engine.restartAudio(error);
@@ -2743,6 +2827,7 @@ void MainComponent::applyThemePalette()
                      static_cast<juce::ToggleButton*>(&effectsToggle),
                      static_cast<juce::ToggleButton*>(&autoEnableToggle),
                      static_cast<juce::ToggleButton*>(&autoDownloadUpdatesToggle),
+                     static_cast<juce::ToggleButton*>(&autoSaveDraftToggle),
                      static_cast<juce::ToggleButton*>(&startWithWindowsToggle),
                      static_cast<juce::ToggleButton*>(&startMinimizedToggle),
                      static_cast<juce::ToggleButton*>(&followAutoEnableWindowToggle),
@@ -3127,6 +3212,135 @@ void MainComponent::persistLastPresetName(const juce::String& presetName) const
     file.replaceWithText(presetName.trim());
 }
 
+juce::File MainComponent::getAutosaveDraftFile() const
+{
+    return settingsStore.getAppDirectory().getChildFile("autosave-draft.json");
+}
+
+void MainComponent::clearAutosaveDraft()
+{
+    lastAutosaveDraftFingerprint.clear();
+    const auto file = getAutosaveDraftFile();
+    if (file.existsAsFile())
+        file.deleteFile();
+}
+
+void MainComponent::saveAutosaveDraftIfNeeded(bool force)
+{
+    if (! cachedSettings.autoSaveDraftRecovery)
+        return;
+
+    const auto now = juce::Time::getMillisecondCounter();
+    if (! force && appStartMs != 0 && (now - appStartMs) < 15000u)
+        return;
+    if (! force && lastDraftAutosaveCheckMs != 0 && (now - lastDraftAutosaveCheckMs) < 8000u)
+        return;
+    lastDraftAutosaveCheckMs = now;
+
+    if (restartOverlayBusy || applyingAudioSettings || audioApplyQueued || draggingResizeGrip || dragFromRow >= 0)
+        return;
+
+    const auto snapshot = buildCurrentPresetSnapshot();
+    if (snapshot.isEmpty())
+        return;
+
+    if (snapshot == lastPresetSnapshot)
+    {
+        clearAutosaveDraft();
+        return;
+    }
+
+    if (! force && snapshot == lastAutosaveDraftFingerprint)
+        return;
+
+    auto draft = buildCurrentPresetData(currentPresetName.isNotEmpty() ? currentPresetName : "Default");
+    draft.name = currentPresetName.isNotEmpty() ? currentPresetName : "Default";
+    auto rootVar = presetDataToJsonVar(draft);
+    if (auto* root = rootVar.getDynamicObject())
+    {
+        root->setProperty("draftType", "recovery");
+        root->setProperty("draftSavedAtUtc", juce::Time::getCurrentTime().toISO8601(true));
+    }
+
+    if (getAutosaveDraftFile().replaceWithText(juce::JSON::toString(rootVar, true)))
+        lastAutosaveDraftFingerprint = snapshot;
+}
+
+bool MainComponent::loadAutosaveDraftToRecoveredPreset(juce::String& recoveredPresetName)
+{
+    const auto file = getAutosaveDraftFile();
+    if (! file.existsAsFile())
+        return false;
+
+    const auto parsed = juce::JSON::parse(file);
+    if (parsed.isVoid())
+        return false;
+
+    PresetData draft;
+    if (! presetDataFromJsonVar(parsed, draft))
+        return false;
+
+    auto baseName = draft.name.trim();
+    if (baseName.isEmpty())
+        baseName = "Draft";
+    baseName = baseName.retainCharacters("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ");
+    if (baseName.isEmpty())
+        baseName = "Draft";
+
+    recoveredPresetName = "Recovered-" + baseName + "-" + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
+    draft.name = recoveredPresetName;
+    presetStore.savePreset(draft);
+
+    loadPresetByName(recoveredPresetName);
+    refreshPresets();
+    presetBox.setText(currentPresetName, juce::dontSendNotification);
+    clearAutosaveDraft();
+    setEffectsHint("Recovered autosave draft", 80);
+    return true;
+}
+
+void MainComponent::promptRestoreAutosaveDraftIfAvailable()
+{
+    if (! cachedSettings.autoSaveDraftRecovery)
+        return;
+
+    const auto file = getAutosaveDraftFile();
+    if (! file.existsAsFile())
+        return;
+
+    juce::String draftName = "the previous session";
+    const auto parsed = juce::JSON::parse(file);
+    if (auto* obj = parsed.getDynamicObject())
+    {
+        const auto n = obj->getProperty("name").toString().trim();
+        if (n.isNotEmpty())
+            draftName = "\"" + n + "\"";
+    }
+
+    juce::AlertWindow::showOkCancelBox(juce::AlertWindow::QuestionIcon,
+                                       "Recover Autosave Draft",
+                                       "Fizzle found an autosave recovery draft from " + draftName + ".\n\nRestore it as a new preset?",
+                                       "Restore",
+                                       "Discard",
+                                       this,
+                                       juce::ModalCallbackFunction::create([this](int result)
+    {
+        if (result == 0)
+        {
+            clearAutosaveDraft();
+            return;
+        }
+
+        juce::String recoveredPresetName;
+        if (! loadAutosaveDraftToRecoveredPreset(recoveredPresetName))
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Recovery Failed",
+                                                   "The autosave draft could not be restored.");
+        }
+    }));
+}
+
 void MainComponent::startRowDrag(int row)
 {
     if (! juce::isPositiveAndBelow(row, getNumRows()))
@@ -3501,6 +3715,7 @@ void MainComponent::buttonClicked(juce::Button* button)
             currentPresetLabel.setText("Current: " + currentPresetName, juce::dontSendNotification);
             refreshPresets();
             markCurrentPresetSnapshot();
+            clearAutosaveDraft();
         }), true);
     }
     else if (button == &deletePresetButton)
@@ -3653,6 +3868,13 @@ void MainComponent::buttonClicked(juce::Button* button)
         {
             setUpdateStatus("Auto-install is off.");
         }
+    }
+    else if (button == &autoSaveDraftToggle)
+    {
+        cachedSettings.autoSaveDraftRecovery = autoSaveDraftToggle.getToggleState();
+        saveCachedSettings();
+        if (! cachedSettings.autoSaveDraftRecovery)
+            clearAutosaveDraft();
     }
     else if (button == &lightModeToggle)
     {
@@ -3815,6 +4037,7 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
                         saveCachedSettings();
                         persistLastPresetName(currentPresetName);
                         markCurrentPresetSnapshot();
+                        clearAutosaveDraft();
                     }
 
                     loadPresetByName(pendingPresetName);
@@ -3851,6 +4074,8 @@ void MainComponent::timerCallback()
         repaint(headerBounds.expanded(28, 12));
         return;
     }
+
+    saveAutosaveDraftIfNeeded(false);
 
     auto d = engine.getDiagnostics();
     meterIn.setLevel(d.inputLevel);
@@ -4723,7 +4948,7 @@ void MainComponent::resized()
                     return h22 + gap + h20 + h28 + gap + h20 + h30 + gap
                          + h20 + h30 + gap + h20 + h30;
                 case 2:
-                    return h22 + h28 + gap + h30 + gap + h56 + gap + h20 + h30;
+                    return h22 + h28 + gap + h28 + gap + h30 + gap + h56 + gap + h20 + h30;
                 case 3:
                     return h22 + gap + h20 + h30 + gap + h20 + h96 + gap + h30 + gap
                          + h28 + gap + h28 + gap + h28 + gap + h36;
@@ -4781,6 +5006,8 @@ void MainComponent::resized()
         {
             updatesLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(22.0f * uiScale)));
             autoDownloadUpdatesToggle.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
+            autoSaveDraftToggle.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
             contentNoFooter.removeFromTop(gap);
             auto updateRow = contentNoFooter.removeFromTop(juce::roundToInt(30.0f * uiScale));
             checkUpdatesButton.setBounds(updateRow.removeFromLeft(juce::roundToInt(120.0f * uiScale)));

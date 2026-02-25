@@ -44,6 +44,7 @@ struct EngineSettings
     juce::String lastPresetName;
     bool hasSeenFirstLaunchGuide { false };
     bool autoInstallUpdates { false };
+    bool autoSaveDraftRecovery { true };
     bool startWithWindows { false };
     bool startMinimizedToTray { false };
     bool followAutoEnableWindowState { false };
