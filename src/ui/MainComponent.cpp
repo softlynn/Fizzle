@@ -33,6 +33,48 @@ const juce::String kGithubRepoUrl("https://github.com/softlynn/Fizzle");
 const juce::String kWebsiteUrl("https://softlynn.github.io/Fizzle/");
 constexpr std::array<int, 8> kBufferSizeOptions { 64, 96, 128, 192, 256, 384, 512, 1024 };
 
+struct PluginRuntimeFormat
+{
+    double sampleRate { kInternalSampleRate };
+    int blockSize { kDefaultBlockSize };
+};
+
+PluginRuntimeFormat getPluginRuntimeFormat(const Diagnostics& diagnostics)
+{
+    const auto deviceRate = diagnostics.sampleRate > 1000.0 ? diagnostics.sampleRate : kInternalSampleRate;
+    const auto deviceBlock = diagnostics.bufferSize > 0 ? diagnostics.bufferSize : kDefaultBlockSize;
+    const auto internalBlock = static_cast<int>(std::ceil((static_cast<double>(deviceBlock) * kInternalSampleRate) / deviceRate));
+
+    PluginRuntimeFormat out;
+    out.sampleRate = kInternalSampleRate;
+    out.blockSize = juce::jmax(64, internalBlock);
+    return out;
+}
+
+bool tryCapturePluginStateNonBlocking(HostedPlugin& plugin,
+                                      juce::MemoryBlock& outState,
+                                      const juce::String& logContext = {})
+{
+    if (plugin.instance == nullptr || plugin.faulted.load() || plugin.editorOpen.load())
+        return false;
+
+    const juce::SpinLock::ScopedTryLockType lock(plugin.callbackLock);
+    if (! lock.isLocked())
+        return false;
+
+    try
+    {
+        plugin.instance->getStateInformation(outState);
+        return true;
+    }
+    catch (...)
+    {
+        if (logContext.isNotEmpty())
+            Logger::instance().log(logContext + plugin.description.name);
+        return false;
+    }
+}
+
 void populateBufferBox(juce::ComboBox& comboBox, int selectedBuffer)
 {
     comboBox.clear();
@@ -698,10 +740,18 @@ public:
         , pluginHandle(std::move(pluginHandleToKeepAlive))
         , onClose(std::move(onCloseFn))
     {
+        if (pluginHandle != nullptr)
+            pluginHandle->editorOpen.store(true);
         setUsingNativeTitleBar(true);
         setResizable(true, true);
         setContentOwned(editor, true);
         centreWithSize(juce::jmax(500, editor->getWidth()), juce::jmax(300, editor->getHeight()));
+    }
+
+    ~PluginEditorWindow() override
+    {
+        if (pluginHandle != nullptr)
+            pluginHandle->editorOpen.store(false);
     }
 
     void closeButtonPressed() override
@@ -1489,6 +1539,17 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 void MainComponent::onWindowVisible()
 {
     applyThemePalette();
+
+    if (autosaveRecoveryPromptDeferred && ! autosaveRecoveryPromptShownThisSession)
+    {
+        autosaveRecoveryPromptDeferred = false;
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::Timer::callAfterDelay(150, [safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->promptRestoreAutosaveDraftIfAvailable();
+        });
+    }
 
     if (scannedOnVisible)
         return;
@@ -2470,6 +2531,14 @@ void MainComponent::rowOpenEditor(int row)
         if (instance == nullptr)
             return;
 
+        if (hosted->faulted.load())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Plugin Disabled",
+                                                   "This plugin was disabled after a processing failure and its editor is blocked for stability.\n\nRemove/re-add the plugin to try again.");
+            return;
+        }
+
         if (! instance->hasEditor())
         {
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
@@ -2481,11 +2550,21 @@ void MainComponent::rowOpenEditor(int row)
         juce::AudioProcessorEditor* editor = nullptr;
         try
         {
-            const juce::SpinLock::ScopedLockType lock(hosted->callbackLock);
+            hosted->editorOpen.store(true);
+            const juce::SpinLock::ScopedTryLockType lock(hosted->callbackLock);
+            if (! lock.isLocked())
+            {
+                hosted->editorOpen.store(false);
+                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                       "Plugin Busy",
+                                                       "The plugin is currently busy or unresponsive. Try again after disabling Effects or restarting audio.");
+                return;
+            }
             editor = instance->createEditorIfNeeded();
         }
         catch (...)
         {
+            hosted->editorOpen.store(false);
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
                                                    "Plugin Editor Failed",
                                                    "The plugin editor failed to open.");
@@ -2494,6 +2573,7 @@ void MainComponent::rowOpenEditor(int row)
 
         if (editor == nullptr)
         {
+            hosted->editorOpen.store(false);
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
                                                    "Plugin Editor Failed",
                                                    "The plugin editor could not be created.");
@@ -3117,7 +3197,7 @@ void MainComponent::triggerUpdateCheck(bool manualTrigger)
     }).detach();
 }
 
-PresetData MainComponent::buildCurrentPresetData(const juce::String& name)
+PresetData MainComponent::buildCurrentPresetData(const juce::String& name, bool includePluginStates)
 {
     PresetData preset;
     preset.name = name;
@@ -3133,17 +3213,18 @@ PresetData MainComponent::buildCurrentPresetData(const juce::String& name)
         state.name = plugin->description.name;
         state.enabled = plugin->enabled.load();
         state.mix = plugin->mix.load();
-        juce::MemoryBlock block;
-        try
+        if (includePluginStates)
         {
-            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
-            plugin->instance->getStateInformation(block);
-            state.base64State = block.toBase64Encoding();
-        }
-        catch (...)
-        {
-            Logger::instance().log("Preset save: state capture failed for " + plugin->description.name);
-            state.base64State.clear();
+            juce::MemoryBlock block;
+            if (tryCapturePluginStateNonBlocking(*plugin, block, "Preset save: state capture failed for "))
+            {
+                state.base64State = block.toBase64Encoding();
+            }
+            else
+            {
+                Logger::instance().log("Preset save: state capture skipped for " + plugin->description.name);
+                state.base64State.clear();
+            }
         }
         preset.plugins.add(state);
     }
@@ -3169,18 +3250,7 @@ juce::String MainComponent::buildCurrentPresetSnapshot()
         pluginObj->setProperty("identifier", plugin->description.fileOrIdentifier);
         pluginObj->setProperty("enabled", plugin->enabled.load());
         pluginObj->setProperty("mix", plugin->mix.load());
-        juce::MemoryBlock block;
-        try
-        {
-            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
-            plugin->instance->getStateInformation(block);
-            pluginObj->setProperty("state", block.toBase64Encoding());
-        }
-        catch (...)
-        {
-            Logger::instance().log("Preset snapshot: state capture failed for " + plugin->description.name);
-            pluginObj->setProperty("state", {});
-        }
+        pluginObj->setProperty("faulted", plugin->faulted.load());
         pluginsArray.add(pluginObj);
     }
     obj->setProperty("plugins", pluginsArray);
@@ -3253,7 +3323,7 @@ void MainComponent::saveAutosaveDraftIfNeeded(bool force)
     if (! force && snapshot == lastAutosaveDraftFingerprint)
         return;
 
-    auto draft = buildCurrentPresetData(currentPresetName.isNotEmpty() ? currentPresetName : "Default");
+    auto draft = buildCurrentPresetData(currentPresetName.isNotEmpty() ? currentPresetName : "Default", false);
     draft.name = currentPresetName.isNotEmpty() ? currentPresetName : "Default";
     auto rootVar = presetDataToJsonVar(draft);
     if (auto* root = rootVar.getDynamicObject())
@@ -3301,8 +3371,17 @@ bool MainComponent::loadAutosaveDraftToRecoveredPreset(juce::String& recoveredPr
 
 void MainComponent::promptRestoreAutosaveDraftIfAvailable()
 {
+    if (autosaveRecoveryPromptShownThisSession)
+        return;
+
     if (! cachedSettings.autoSaveDraftRecovery)
         return;
+
+    if (! isShowing())
+    {
+        autosaveRecoveryPromptDeferred = true;
+        return;
+    }
 
     const auto file = getAutosaveDraftFile();
     if (! file.existsAsFile())
@@ -3316,6 +3395,8 @@ void MainComponent::promptRestoreAutosaveDraftIfAvailable()
         if (n.isNotEmpty())
             draftName = "\"" + n + "\"";
     }
+
+    autosaveRecoveryPromptShownThisSession = true;
 
     juce::AlertWindow::showOkCancelBox(juce::AlertWindow::QuestionIcon,
                                        "Recover Autosave Draft",
@@ -3405,16 +3486,8 @@ void MainComponent::capturePluginSnapshotForUndo(int index)
         return;
 
     juce::MemoryBlock block;
-    try
-    {
-        const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
-        plugin->instance->getStateInformation(block);
-    }
-    catch (...)
-    {
-        Logger::instance().log("Undo capture failed for " + plugin->description.name);
-        return;
-    }
+    if (! tryCapturePluginStateNonBlocking(*plugin, block, "Undo capture failed for "))
+        Logger::instance().log("Undo capture skipped for " + plugin->description.name);
     lastRemovedPlugin.description = plugin->description;
     lastRemovedPlugin.base64State = block.toBase64Encoding();
     lastRemovedPlugin.enabled = plugin->enabled.load();
@@ -3445,11 +3518,10 @@ void MainComponent::restoreLastRemovedPlugin()
 
     juce::String error;
     const auto d = engine.getDiagnostics();
-    const auto sampleRate = d.sampleRate > 0.0 ? d.sampleRate : 48000.0;
-    const auto blockSize = d.bufferSize > 0 ? d.bufferSize : kDefaultBlockSize;
+    const auto pluginFormat = getPluginRuntimeFormat(d);
     if (! engine.getVstHost().addPluginWithState(lastRemovedPlugin.description,
-                                                 sampleRate,
-                                                 blockSize,
+                                                 pluginFormat.sampleRate,
+                                                 pluginFormat.blockSize,
                                                  lastRemovedPlugin.base64State,
                                                  error))
     {
@@ -3555,15 +3627,13 @@ void MainComponent::loadPresetByName(const juce::String& name)
 
         engine.getVstHost().clear();
         juce::String error;
-        const auto d = engine.getDiagnostics();
-        const auto sampleRate = d.sampleRate > 0.0 ? d.sampleRate : 48000.0;
-        const auto blockSize = d.bufferSize > 0 ? d.bufferSize : kDefaultBlockSize;
+        const auto pluginFormat = getPluginRuntimeFormat(engine.getDiagnostics());
         for (const auto& p : preset->plugins)
         {
             juce::PluginDescription description;
             if (engine.getVstHost().findDescriptionByIdentifier(p.identifier, description))
             {
-                if (engine.getVstHost().addPluginWithState(description, sampleRate, blockSize, p.base64State, error))
+                if (engine.getVstHost().addPluginWithState(description, pluginFormat.sampleRate, pluginFormat.blockSize, p.base64State, error))
                 {
                     auto chain = engine.getVstHost().getChain();
                     if (auto* last = chain.getLast())
@@ -3942,10 +4012,8 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
         if (selected >= 0 && selected < known.size())
         {
             juce::String error;
-            const auto d = engine.getDiagnostics();
-            const auto sampleRate = d.sampleRate > 0.0 ? d.sampleRate : 48000.0;
-            const auto blockSize = d.bufferSize > 0 ? d.bufferSize : kDefaultBlockSize;
-            engine.getVstHost().addPlugin(known.getReference(selected), sampleRate, blockSize, error);
+            const auto pluginFormat = getPluginRuntimeFormat(engine.getDiagnostics());
+            engine.getVstHost().addPlugin(known.getReference(selected), pluginFormat.sampleRate, pluginFormat.blockSize, error);
             if (error.isNotEmpty())
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Plugin Load Failed", error);
             refreshPluginChainUi();

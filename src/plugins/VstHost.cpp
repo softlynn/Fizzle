@@ -1,5 +1,9 @@
 #include "VstHost.h"
+#include "../AppConfig.h"
 #include "../core/Logger.h"
+#if JUCE_WINDOWS && defined(_MSC_VER)
+#include <windows.h>
+#endif
 
 namespace fizzle
 {
@@ -15,6 +19,54 @@ juce::AudioPluginFormat* getVst3Format(juce::AudioPluginFormatManager& fm)
     }
     return nullptr;
 }
+
+void sanitizeProcessingFormat(double& sampleRate, int& blockSize)
+{
+    if (sampleRate <= 1000.0)
+        sampleRate = kInternalSampleRate;
+    if (blockSize <= 0)
+        blockSize = kDefaultBlockSize;
+}
+
+bool preparePluginInstance(HostedPlugin& hosted, double sampleRate, int blockSize, const juce::String& stage)
+{
+    if (hosted.instance == nullptr)
+        return false;
+
+    sanitizeProcessingFormat(sampleRate, blockSize);
+
+    try
+    {
+        hosted.instance->setRateAndBufferSizeDetails(sampleRate, blockSize);
+        hosted.instance->releaseResources();
+        hosted.instance->prepareToPlay(sampleRate, blockSize);
+        hosted.instance->reset();
+        return true;
+    }
+    catch (...)
+    {
+        Logger::instance().log("VST " + stage + " failed for " + hosted.description.name);
+        return false;
+    }
+}
+
+#if JUCE_WINDOWS && defined(_MSC_VER)
+bool processPluginBlockWithSeh(juce::AudioPluginInstance& instance,
+                               juce::AudioBuffer<float>& audio,
+                               juce::MidiBuffer& midi) noexcept
+{
+    bool ok = true;
+    __try
+    {
+        instance.processBlock(audio, midi);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        ok = false;
+    }
+    return ok;
+}
+#endif
 }
 
 VstHost::VstHost()
@@ -44,6 +96,8 @@ bool VstHost::createHostedPlugin(const juce::PluginDescription& description,
     }
 
     auto resolved = *types[0];
+    sanitizeProcessingFormat(sampleRate, blockSize);
+
     auto result = formatManager.createPluginInstance(resolved, sampleRate, blockSize, error);
     if (result == nullptr)
         return false;
@@ -51,7 +105,11 @@ bool VstHost::createHostedPlugin(const juce::PluginDescription& description,
     auto hosted = std::make_shared<HostedPlugin>();
     hosted->description = resolved;
     hosted->instance.reset(result.release());
-    hosted->instance->prepareToPlay(sampleRate, blockSize);
+    if (! preparePluginInstance(*hosted, sampleRate, blockSize, "prepare"))
+    {
+        error = "Plugin failed to initialize: " + resolved.name;
+        return false;
+    }
     outHosted = std::move(hosted);
     return true;
 }
@@ -67,12 +125,15 @@ void VstHost::refreshLatencyCacheLocked()
     int total = 0;
     for (const auto& plugin : chain)
     {
-        if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load())
+        if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load()
+            || plugin->faulted.load() || plugin->editorOpen.load())
             continue;
 
         try
         {
-            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
+            const juce::SpinLock::ScopedTryLockType lock(plugin->callbackLock);
+            if (! lock.isLocked())
+                continue;
             total += plugin->instance->getLatencySamples();
         }
         catch (...)
@@ -159,6 +220,15 @@ void VstHost::importScannedPaths(const juce::StringArray& paths)
 
 bool VstHost::addPlugin(const juce::PluginDescription& description, double sampleRate, int blockSize, juce::String& error)
 {
+    const auto activeRate = activeProcessingSampleRate.load();
+    const auto activeBlock = activeProcessingBlockSize.load();
+    if (activeRate > 1000.0 && activeBlock > 0)
+    {
+        sampleRate = activeRate;
+        blockSize = activeBlock;
+    }
+    sanitizeProcessingFormat(sampleRate, blockSize);
+
     HostedPluginPtr hosted;
     if (! createHostedPlugin(description, sampleRate, blockSize, error, hosted))
         return false;
@@ -175,6 +245,15 @@ bool VstHost::addPluginWithState(const juce::PluginDescription& description,
                                  const juce::String& base64State,
                                  juce::String& error)
 {
+    const auto activeRate = activeProcessingSampleRate.load();
+    const auto activeBlock = activeProcessingBlockSize.load();
+    if (activeRate > 1000.0 && activeBlock > 0)
+    {
+        sampleRate = activeRate;
+        blockSize = activeBlock;
+    }
+    sanitizeProcessingFormat(sampleRate, blockSize);
+
     HostedPluginPtr hosted;
     if (! createHostedPlugin(description, sampleRate, blockSize, error, hosted))
         return false;
@@ -194,6 +273,13 @@ bool VstHost::addPluginWithState(const juce::PluginDescription& description,
                 Logger::instance().log("VST state restore failed for " + hosted->description.name);
             }
         }
+    }
+
+    // Some plugins become unstable until they are re-prepared after state restore.
+    if (! preparePluginInstance(*hosted, sampleRate, blockSize, "re-prepare"))
+    {
+        error = "Plugin failed to initialize after restoring state: " + hosted->description.name;
+        return false;
     }
 
     {
@@ -262,10 +348,10 @@ void VstHost::setEnabled(int index, bool enabled)
     if (! juce::isPositiveAndBelow(index, static_cast<int>(chain.size())))
         return;
 
-    target = chain[static_cast<size_t>(index)];
-    if (target != nullptr)
-        target->enabled.store(enabled);
-    refreshLatencyCacheLocked();
+        target = chain[static_cast<size_t>(index)];
+        if (target != nullptr)
+            target->enabled.store(enabled && ! target->faulted.load());
+        refreshLatencyCacheLocked();
 }
 
 void VstHost::setMix(int index, float mix)
@@ -309,7 +395,8 @@ void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
 
     for (const auto& plugin : snapshot)
     {
-        if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load())
+        if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load()
+            || plugin->faulted.load() || plugin->editorOpen.load())
             continue;
 
         const juce::SpinLock::ScopedTryLockType lock(plugin->callbackLock);
@@ -317,16 +404,37 @@ void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
             continue;
 
         wetBuffer.makeCopyOf(buffer, true);
+#if JUCE_WINDOWS && defined(_MSC_VER)
+        bool pluginCrashed = false;
+        try
+        {
+            pluginCrashed = ! processPluginBlockWithSeh(*plugin->instance, wetBuffer, midi);
+        }
+        catch (...)
+        {
+            pluginCrashed = true;
+        }
+
+        if (pluginCrashed)
+        {
+            plugin->faulted.store(true);
+            plugin->enabled.store(false);
+            Logger::instance().log("VST process crashed for " + plugin->description.name + " (disabled)");
+            continue;
+        }
+#else
         try
         {
             plugin->instance->processBlock(wetBuffer, midi);
         }
         catch (...)
         {
+            plugin->faulted.store(true);
             plugin->enabled.store(false);
             Logger::instance().log("VST process failed for " + plugin->description.name + " (disabled)");
             continue;
         }
+#endif
 
         const auto mix = juce::jlimit(0.0f, 1.0f, plugin->mix.load());
         const auto inv = 1.0f - mix;
@@ -378,16 +486,27 @@ std::vector<VstHost::HostedPluginHandle> VstHost::getChainHandles() const
 
 void VstHost::prepare(double sampleRate, int blockSize)
 {
+    sanitizeProcessingFormat(sampleRate, blockSize);
+    activeProcessingSampleRate.store(sampleRate);
+    activeProcessingBlockSize.store(blockSize);
+
     const auto snapshot = copyChainSnapshot();
     for (const auto& plugin : snapshot)
     {
-        if (plugin == nullptr || plugin->instance == nullptr)
+        if (plugin == nullptr || plugin->instance == nullptr || plugin->faulted.load())
             continue;
         try
         {
-            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
+            const juce::SpinLock::ScopedTryLockType lock(plugin->callbackLock);
+            if (! lock.isLocked())
+            {
+                Logger::instance().log("VST prepare skipped (busy) for " + plugin->description.name);
+                continue;
+            }
+            plugin->instance->setRateAndBufferSizeDetails(sampleRate, blockSize);
             plugin->instance->releaseResources();
             plugin->instance->prepareToPlay(sampleRate, blockSize);
+            plugin->instance->reset();
         }
         catch (...)
         {
@@ -401,14 +520,22 @@ void VstHost::prepare(double sampleRate, int blockSize)
 
 void VstHost::release()
 {
+    activeProcessingSampleRate.store(0.0);
+    activeProcessingBlockSize.store(0);
+
     const auto snapshot = copyChainSnapshot();
     for (const auto& plugin : snapshot)
     {
-        if (plugin == nullptr || plugin->instance == nullptr)
+        if (plugin == nullptr || plugin->instance == nullptr || plugin->faulted.load())
             continue;
         try
         {
-            const juce::SpinLock::ScopedLockType lock(plugin->callbackLock);
+            const juce::SpinLock::ScopedTryLockType lock(plugin->callbackLock);
+            if (! lock.isLocked())
+            {
+                Logger::instance().log("VST release skipped (busy) for " + plugin->description.name);
+                continue;
+            }
             plugin->instance->releaseResources();
         }
         catch (...)

@@ -12,6 +12,8 @@ struct HostedPlugin
     juce::PluginDescription description;
     std::unique_ptr<juce::AudioPluginInstance> instance;
     std::atomic<bool> enabled { true };
+    std::atomic<bool> faulted { false };
+    std::atomic<bool> editorOpen { false };
     std::atomic<float> mix { 1.0f };
     juce::SpinLock callbackLock;
 };
@@ -63,6 +65,8 @@ private:
     juce::Array<ScannedEntry> scanned;
     juce::AudioBuffer<float> wetBuffer;
     std::atomic<int> cachedLatencySamples { 0 };
+    std::atomic<double> activeProcessingSampleRate { 0.0 };
+    std::atomic<int> activeProcessingBlockSize { 0 };
 
     bool createHostedPlugin(const juce::PluginDescription& description,
                             double sampleRate,

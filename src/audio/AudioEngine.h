@@ -22,7 +22,8 @@ struct Diagnostics
     uint64_t droppedBuffers { 0 };
 };
 
-class AudioEngine : public juce::AudioIODeviceCallback
+class AudioEngine : public juce::AudioIODeviceCallback,
+                    private juce::AsyncUpdater
 {
 public:
     AudioEngine();
@@ -58,6 +59,7 @@ public:
                                           const juce::AudioIODeviceCallbackContext& context) override;
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
+    void audioDeviceError(const juce::String& errorMessage) override;
 
 private:
     class MonitorCallback : public juce::AudioIODeviceCallback
@@ -77,6 +79,8 @@ private:
     bool deviceManagerInitialised { false };
     bool monitorManagerInitialised { false };
     EffectParameters* params { nullptr };
+    mutable juce::CriticalSection lifecycleLock;
+    mutable juce::CriticalSection settingsLock;
     EngineSettings settings;
 
     ProcessorChain chain;
@@ -102,5 +106,13 @@ private:
 
     juce::AbstractFifo monitorFifo { 32768 };
     juce::AudioBuffer<float> monitorFifoBuffer { 2, 32768 };
+
+    std::atomic<bool> autoRecoveryPending { false };
+    std::atomic<juce::uint32> lastAutoRecoveryAttemptMs { 0 };
+    juce::String lastAutoRecoveryReason;
+    juce::CriticalSection autoRecoveryLock;
+
+    void queueAutoRecoveryRestart(const juce::String& reason);
+    void handleAsyncUpdate() override;
 };
 }

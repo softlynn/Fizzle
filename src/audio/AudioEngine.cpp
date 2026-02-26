@@ -6,6 +6,8 @@ AudioEngine::AudioEngine() = default;
 
 AudioEngine::~AudioEngine()
 {
+    cancelPendingUpdate();
+    autoRecoveryPending.store(false);
     monitorDeviceManager.removeAudioCallback(&monitorCallback);
     monitorDeviceManager.closeAudioDevice();
     stop();
@@ -13,8 +15,9 @@ AudioEngine::~AudioEngine()
 
 bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
 {
-    const auto previousSettings = settings;
-    settings = requested;
+    const juce::ScopedLock lifecycleScope(lifecycleLock);
+
+    auto nextSettings = requested;
     deviceReconfiguring.store(true);
 
     juce::AudioDeviceManager::AudioDeviceSetup setup;
@@ -23,7 +26,6 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         const auto initError = deviceManager.initialise(2, 2, nullptr, true, {}, nullptr);
         if (initError.isNotEmpty())
         {
-            settings = previousSettings;
             deviceReconfiguring.store(false);
             error = initError;
             Logger::instance().log("Audio device manager init failed: " + initError);
@@ -40,17 +42,17 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         const auto inputs = type->getDeviceNames(true);
         const auto outputs = type->getDeviceNames(false);
 
-        if (settings.inputDeviceName.isEmpty() && inputs.size() > 0)
-            settings.inputDeviceName = inputs[0];
+        if (nextSettings.inputDeviceName.isEmpty() && inputs.size() > 0)
+            nextSettings.inputDeviceName = inputs[0];
 
-        bool outputExists = outputs.contains(settings.outputDeviceName);
+        bool outputExists = outputs.contains(nextSettings.outputDeviceName);
         if (! outputExists)
         {
             for (const auto& out : outputs)
             {
                 if (out.containsIgnoreCase("vb-cable") || out.containsIgnoreCase("cable input") || out.containsIgnoreCase("virtual"))
                 {
-                    settings.outputDeviceName = out;
+                    nextSettings.outputDeviceName = out;
                     outputExists = true;
                     break;
                 }
@@ -58,13 +60,13 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         }
 
         if (! outputExists && outputs.size() > 0)
-            settings.outputDeviceName = outputs[0];
+            nextSettings.outputDeviceName = outputs[0];
     }
 
-    setup.inputDeviceName = settings.inputDeviceName;
-    setup.outputDeviceName = settings.outputDeviceName;
-    setup.bufferSize = settings.bufferSize;
-    setup.sampleRate = settings.preferredSampleRate;
+    setup.inputDeviceName = nextSettings.inputDeviceName;
+    setup.outputDeviceName = nextSettings.outputDeviceName;
+    setup.bufferSize = nextSettings.bufferSize;
+    setup.sampleRate = nextSettings.preferredSampleRate;
     setup.useDefaultInputChannels = false;
     setup.useDefaultOutputChannels = false;
     setup.inputChannels.clear();
@@ -82,7 +84,6 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         result = deviceManager.setAudioDeviceSetup(setup, true);
         if (result.isNotEmpty())
         {
-            settings = previousSettings;
             deviceReconfiguring.store(false);
             error = result;
             Logger::instance().log("Audio setup failed: " + result);
@@ -92,18 +93,24 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
 
     juce::AudioDeviceManager::AudioDeviceSetup appliedSetup;
     deviceManager.getAudioDeviceSetup(appliedSetup);
-    settings.inputDeviceName = appliedSetup.inputDeviceName;
-    settings.outputDeviceName = appliedSetup.outputDeviceName;
+    nextSettings.inputDeviceName = appliedSetup.inputDeviceName;
+    nextSettings.outputDeviceName = appliedSetup.outputDeviceName;
     if (appliedSetup.bufferSize > 0)
-        settings.bufferSize = appliedSetup.bufferSize;
+        nextSettings.bufferSize = appliedSetup.bufferSize;
     if (appliedSetup.sampleRate > 0.0)
-        settings.preferredSampleRate = appliedSetup.sampleRate;
+        nextSettings.preferredSampleRate = appliedSetup.sampleRate;
+
+    {
+        const juce::ScopedLock settingsScope(settingsLock);
+        settings = nextSettings;
+    }
 
     deviceManager.addAudioCallback(this);
 
     if (listenEnabled.load() && monitorOutputDevice.isNotEmpty())
         setListenEnabled(true);
 
+    autoRecoveryPending.store(false);
     deviceReconfiguring.store(false);
     Logger::instance().log("Audio engine started");
     return true;
@@ -111,6 +118,7 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
 
 void AudioEngine::stop()
 {
+    const juce::ScopedLock lifecycleScope(lifecycleLock);
     deviceReconfiguring.store(true);
     deviceManager.removeAudioCallback(this);
     deviceManager.closeAudioDevice();
@@ -124,6 +132,7 @@ void AudioEngine::setMonitorOutputDevice(const juce::String& name)
 
 void AudioEngine::setListenEnabled(bool enabled)
 {
+    const juce::ScopedLock lifecycleScope(lifecycleLock);
     listenEnabled.store(enabled);
 
     monitorDeviceManager.removeAudioCallback(&monitorCallback);
@@ -157,8 +166,9 @@ void AudioEngine::setListenEnabled(bool enabled)
     const auto preferredRate = currentDeviceSampleRate.load();
     if (preferredRate > 0.0)
         setup.sampleRate = preferredRate;
-    if (settings.bufferSize > 0)
-        setup.bufferSize = settings.bufferSize;
+    const auto current = currentSettings();
+    if (current.bufferSize > 0)
+        setup.bufferSize = current.bufferSize;
 
     error = monitorDeviceManager.setAudioDeviceSetup(setup, true);
     if (error.isNotEmpty())
@@ -191,13 +201,15 @@ Diagnostics AudioEngine::getDiagnostics() const
 
 EngineSettings AudioEngine::currentSettings() const
 {
+    const juce::ScopedLock settingsScope(settingsLock);
     return settings;
 }
 
 void AudioEngine::restartAudio(juce::String& error)
 {
+    const auto current = currentSettings();
     stop();
-    if (! start(settings, error))
+    if (! start(current, error))
         Logger::instance().log("Audio restart failed: " + error);
 }
 
@@ -344,9 +356,10 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 
     if (device != nullptr)
     {
+        const auto current = currentSettings();
         const juce::ScopedLock sl(diagnosticsLock);
-        diagnostics.inputDevice = settings.inputDeviceName;
-        diagnostics.outputDevice = settings.outputDeviceName;
+        diagnostics.inputDevice = current.inputDeviceName;
+        diagnostics.outputDevice = current.outputDeviceName;
         diagnostics.sampleRate = sampleRate;
         diagnostics.bufferSize = device->getCurrentBufferSizeSamples();
         const auto ioMs = (device->getInputLatencyInSamples() + device->getOutputLatencyInSamples()) * 1000.0 / sampleRate;
@@ -364,6 +377,61 @@ void AudioEngine::audioDeviceStopped()
     chain.reset();
     vstHost.release();
     Logger::instance().log("Audio device stopped");
+
+    if (! deviceReconfiguring.load())
+        queueAutoRecoveryRestart("device stopped");
+}
+
+void AudioEngine::audioDeviceError(const juce::String& errorMessage)
+{
+    Logger::instance().log("Audio device error: " + errorMessage);
+    if (! deviceReconfiguring.load())
+        queueAutoRecoveryRestart("device error");
+}
+
+void AudioEngine::queueAutoRecoveryRestart(const juce::String& reason)
+{
+    if (deviceReconfiguring.load())
+        return;
+
+    {
+        const juce::ScopedLock sl(autoRecoveryLock);
+        lastAutoRecoveryReason = reason;
+    }
+
+    if (autoRecoveryPending.exchange(true))
+        return;
+
+    triggerAsyncUpdate();
+}
+
+void AudioEngine::handleAsyncUpdate()
+{
+    if (! autoRecoveryPending.exchange(false))
+        return;
+
+    if (deviceReconfiguring.load())
+        return;
+
+    const auto now = juce::Time::getMillisecondCounter();
+    const auto last = lastAutoRecoveryAttemptMs.load();
+    if (last != 0 && static_cast<juce::uint32>(now - last) < 1500u)
+        return;
+
+    lastAutoRecoveryAttemptMs.store(now);
+
+    juce::String reason;
+    {
+        const juce::ScopedLock sl(autoRecoveryLock);
+        reason = lastAutoRecoveryReason;
+    }
+
+    juce::String error;
+    restartAudio(error);
+    if (error.isNotEmpty())
+        Logger::instance().log("Auto recovery restart failed (" + reason + "): " + error);
+    else
+        Logger::instance().log("Auto recovery restart succeeded (" + reason + ")");
 }
 
 void AudioEngine::MonitorCallback::audioDeviceIOCallbackWithContext(const float* const*, int, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&)

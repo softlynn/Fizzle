@@ -145,6 +145,8 @@ private:
     float savePresetFlashAlpha { 0.0f };
     float aboutFlashAlpha { 0.0f };
     bool scannedOnVisible { false };
+    bool autosaveRecoveryPromptDeferred { false };
+    bool autosaveRecoveryPromptShownThisSession { false };
     bool settingsPanelTargetVisible { false };
     juce::String currentPresetName { "Default" };
     juce::String pendingPresetName;
@@ -277,7 +279,7 @@ private:
     void closePluginEditorWindow();
     bool computeAutoEnableShouldEnable(bool& hasCondition) const;
     void setEffectsHint(const juce::String& text, int ticks = 120);
-    PresetData buildCurrentPresetData(const juce::String& name);
+    PresetData buildCurrentPresetData(const juce::String& name, bool includePluginStates = true);
     juce::String buildCurrentPresetSnapshot();
     bool hasUnsavedPresetChanges();
     void markCurrentPresetSnapshot();
