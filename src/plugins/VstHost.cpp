@@ -155,6 +155,7 @@ juce::StringArray VstHost::scanFolder(const juce::File& folder)
     juce::Array<juce::File> files;
     folder.findChildFiles(files, juce::File::findFiles, true, "*.vst3");
 
+    const juce::ScopedLock sl(scannedLock);
     for (const auto& f : files)
     {
         const auto path = f.getFullPathName();
@@ -181,6 +182,7 @@ juce::StringArray VstHost::scanFolder(const juce::File& folder)
 juce::Array<juce::PluginDescription> VstHost::getKnownPluginDescriptions() const
 {
     juce::Array<juce::PluginDescription> out;
+    const juce::ScopedLock sl(scannedLock);
     for (const auto& s : scanned)
     {
         juce::PluginDescription d;
@@ -195,6 +197,7 @@ juce::Array<juce::PluginDescription> VstHost::getKnownPluginDescriptions() const
 juce::StringArray VstHost::getScannedPaths() const
 {
     juce::StringArray out;
+    const juce::ScopedLock sl(scannedLock);
     for (const auto& s : scanned)
         out.add(s.path);
     return out;
@@ -202,6 +205,7 @@ juce::StringArray VstHost::getScannedPaths() const
 
 void VstHost::importScannedPaths(const juce::StringArray& paths)
 {
+    const juce::ScopedLock sl(scannedLock);
     for (const auto& p : paths)
     {
         bool exists = false;
@@ -293,6 +297,7 @@ bool VstHost::addPluginWithState(const juce::PluginDescription& description,
 
 bool VstHost::findDescriptionByIdentifier(const juce::String& identifier, juce::PluginDescription& out) const
 {
+    const juce::ScopedLock sl(scannedLock);
     for (const auto& s : scanned)
     {
         if (s.path == identifier)

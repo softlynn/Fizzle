@@ -79,8 +79,14 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
     if (result.isNotEmpty())
     {
         Logger::instance().log("Preferred setup failed, retrying with system defaults: " + result);
+        setup.inputDeviceName.clear();
+        setup.outputDeviceName.clear();
         setup.sampleRate = 0.0;
         setup.bufferSize = 0;
+        setup.useDefaultInputChannels = true;
+        setup.useDefaultOutputChannels = true;
+        setup.inputChannels.clear();
+        setup.outputChannels.clear();
         result = deviceManager.setAudioDeviceSetup(setup, true);
         if (result.isNotEmpty())
         {
@@ -174,8 +180,13 @@ void AudioEngine::setListenEnabled(bool enabled)
     if (error.isNotEmpty())
     {
         Logger::instance().log("Monitor preferred setup failed, retrying with defaults: " + error);
+        setup.outputDeviceName.clear();
         setup.sampleRate = 0.0;
         setup.bufferSize = 0;
+        setup.useDefaultInputChannels = true;
+        setup.useDefaultOutputChannels = true;
+        setup.inputChannels.clear();
+        setup.outputChannels.clear();
         error = monitorDeviceManager.setAudioDeviceSetup(setup, true);
     }
     if (error.isNotEmpty())
@@ -184,6 +195,11 @@ void AudioEngine::setListenEnabled(bool enabled)
         listenEnabled.store(false);
         return;
     }
+
+    juce::AudioDeviceManager::AudioDeviceSetup appliedMonitorSetup;
+    monitorDeviceManager.getAudioDeviceSetup(appliedMonitorSetup);
+    if (appliedMonitorSetup.outputDeviceName.isNotEmpty())
+        monitorOutputDevice = appliedMonitorSetup.outputDeviceName;
 
     monitorDeviceManager.addAudioCallback(&monitorCallback);
 }

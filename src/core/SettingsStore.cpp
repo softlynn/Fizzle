@@ -17,6 +17,9 @@ EngineSettings fromVar(const juce::var& data)
         out.vstScanFolder = obj->getProperty("vstScanFolder").toString();
         out.hasCompletedInitialVstScan = obj->hasProperty("hasCompletedInitialVstScan") ? static_cast<bool>(obj->getProperty("hasCompletedInitialVstScan")) : false;
         out.autoEnableByApp = obj->hasProperty("autoEnableByApp") ? static_cast<bool>(obj->getProperty("autoEnableByApp")) : false;
+        out.autoListenOnAutoEnable = obj->hasProperty("autoListenOnAutoEnable")
+                                         ? static_cast<bool>(obj->getProperty("autoListenOnAutoEnable"))
+                                         : false;
         out.autoEnableProcessName = obj->getProperty("autoEnableProcessName").toString();
         if (auto* arr = obj->getProperty("autoEnableProcessNames").getArray())
         {
@@ -86,6 +89,7 @@ juce::var toVar(const EngineSettings& settings)
     obj->setProperty("vstScanFolder", settings.vstScanFolder);
     obj->setProperty("hasCompletedInitialVstScan", settings.hasCompletedInitialVstScan);
     obj->setProperty("autoEnableByApp", settings.autoEnableByApp);
+    obj->setProperty("autoListenOnAutoEnable", settings.autoListenOnAutoEnable);
     obj->setProperty("autoEnableProcessName", settings.autoEnableProcessName);
     juce::Array<juce::var> enabledNames;
     for (const auto& n : settings.autoEnableProcessNames)

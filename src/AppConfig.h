@@ -37,6 +37,7 @@ struct EngineSettings
     bool hasCompletedInitialVstScan { false };
     juce::StringArray scannedVstPaths;
     bool autoEnableByApp { false };
+    bool autoListenOnAutoEnable { false };
     juce::String autoEnableProcessName;
     juce::StringArray autoEnableProcessNames;
     juce::String autoEnableProcessPath;

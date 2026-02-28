@@ -9,6 +9,7 @@
 #include "DiagnosticsPanel.h"
 #include <vector>
 #include <atomic>
+#include <thread>
 
 namespace fizzle
 {
@@ -20,6 +21,7 @@ class MainComponent : public juce::Component,
 {
 public:
     MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef, PresetStore& presetsRef, EffectParameters& paramsRef);
+    ~MainComponent() override;
 
     void resized() override;
     void paint(juce::Graphics& g) override;
@@ -110,6 +112,7 @@ private:
     juce::TextButton browseAppPathButton { "Browse..." };
     juce::TextButton removeProgramButton { "Remove Selected" };
     juce::TextButton closeSettingsButton { "Close" };
+    juce::ToggleButton autoListenOnAutoEnableToggle { "Auto Listen with Program Auto-Enable" };
     juce::ToggleButton autoDownloadUpdatesToggle { "Auto-install new updates" };
     juce::ToggleButton autoSaveDraftToggle { "Auto-save recovery drafts" };
     juce::TextButton checkUpdatesButton { "Check Now" };
@@ -165,6 +168,8 @@ private:
     bool audioApplyQueued { false };
     bool applyingAudioSettings { false };
     std::atomic<bool> updateCheckInFlight { false };
+    std::atomic<bool> runningAppsRefreshInFlight { false };
+    std::atomic<bool> vstScanInFlight { false };
     bool hasCheckedUpdatesThisSession { false };
     juce::String latestAvailableVersion;
     int activeSettingsTab { 0 };
@@ -225,6 +230,8 @@ private:
     std::vector<FizzBubble> logoFizzBubbles;
     bool logoFizzActive { false };
     int logoFizzTicks { 0 };
+    std::thread runningAppsThread;
+    std::thread vstScanThread;
     struct RemovedPluginSnapshot
     {
         juce::PluginDescription description;
@@ -260,7 +267,6 @@ private:
     void removeSelectedProgram();
     juce::String getForegroundProcessName() const;
     juce::String getForegroundProcessPath() const;
-    juce::Image extractAppIcon(const juce::String& exePath) const;
     void saveCachedSettings();
     std::vector<int> filterRunningAppIndices(const juce::String& query) const;
     void setSettingsPanelVisible(bool visible);
@@ -278,6 +284,7 @@ private:
     void rowOpenEditor(int row);
     void closePluginEditorWindow();
     bool computeAutoEnableShouldEnable(bool& hasCondition) const;
+    bool enableListenFromSettings(bool showConflictDialog);
     void setEffectsHint(const juce::String& text, int ticks = 120);
     PresetData buildCurrentPresetData(const juce::String& name, bool includePluginStates = true);
     juce::String buildCurrentPresetSnapshot();

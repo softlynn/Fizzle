@@ -61,6 +61,7 @@ private:
 
     juce::AudioPluginFormatManager formatManager;
     mutable juce::CriticalSection chainLock;
+    mutable juce::CriticalSection scannedLock;
     std::vector<HostedPluginPtr> chain;
     juce::Array<ScannedEntry> scanned;
     juce::AudioBuffer<float> wetBuffer;

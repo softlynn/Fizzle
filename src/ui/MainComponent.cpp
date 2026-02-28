@@ -272,6 +272,58 @@ bool setRunAtStartupEnabled(bool enabled, bool launchToTray)
 }
 #endif
 
+juce::Image extractIconForExecutable(const juce::String& exePath)
+{
+#if JUCE_WINDOWS
+    HICON smallIcon = nullptr;
+    if (ExtractIconExW(exePath.toWideCharPointer(), 0, nullptr, &smallIcon, 1) > 0 && smallIcon != nullptr)
+    {
+        juce::Image image = juce::Image(juce::Image::ARGB, 16, 16, true);
+        juce::Image::BitmapData bd(image, juce::Image::BitmapData::writeOnly);
+
+        BITMAPV5HEADER bi {};
+        bi.bV5Size = sizeof(BITMAPV5HEADER);
+        bi.bV5Width = 16;
+        bi.bV5Height = -16;
+        bi.bV5Planes = 1;
+        bi.bV5BitCount = 32;
+        bi.bV5Compression = BI_BITFIELDS;
+        bi.bV5RedMask = 0x00FF0000;
+        bi.bV5GreenMask = 0x0000FF00;
+        bi.bV5BlueMask = 0x000000FF;
+        bi.bV5AlphaMask = 0xFF000000;
+
+        void* bits = nullptr;
+        auto hdc = GetDC(nullptr);
+        auto hbm = CreateDIBSection(hdc, reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS, &bits, nullptr, 0);
+        auto mem = CreateCompatibleDC(hdc);
+        auto old = SelectObject(mem, hbm);
+        DrawIconEx(mem, 0, 0, smallIcon, 16, 16, 0, nullptr, DI_NORMAL);
+
+        auto* src = static_cast<const uint8_t*>(bits);
+        for (int y = 0; y < 16; ++y)
+        {
+            for (int x = 0; x < 16; ++x)
+            {
+                const auto i = (y * 16 + x) * 4;
+                const juce::Colour c(src[i + 2], src[i + 1], src[i + 0], src[i + 3]);
+                bd.setPixelColour(x, y, c);
+            }
+        }
+
+        SelectObject(mem, old);
+        DeleteDC(mem);
+        DeleteObject(hbm);
+        ReleaseDC(nullptr, hdc);
+        DestroyIcon(smallIcon);
+        return image;
+    }
+#else
+    juce::ignoreUnused(exePath);
+#endif
+    return {};
+}
+
 class ModernLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
@@ -1206,6 +1258,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsNavUpdatesButton.setToggleState(false, juce::dontSendNotification);
     settingsNavStartupButton.setToggleState(false, juce::dontSendNotification);
     autoEnableToggle.setButtonText("Auto Enable by Program");
+    autoListenOnAutoEnableToggle.setButtonText("Auto Listen with Program Auto-Enable");
     autoDownloadUpdatesToggle.setButtonText("Auto-install new updates");
     autoSaveDraftToggle.setButtonText("Auto-save recovery drafts");
     startWithWindowsToggle.setButtonText("Start with Windows");
@@ -1243,6 +1296,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     removeProgramButton.addListener(this);
     closeSettingsButton.addListener(this);
     autoEnableToggle.addListener(this);
+    autoListenOnAutoEnableToggle.addListener(this);
     refreshAppsButton.addListener(this);
     autoDownloadUpdatesToggle.addListener(this);
     autoSaveDraftToggle.addListener(this);
@@ -1390,6 +1444,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(enabledProgramsLabel);
     settingsPanel->addAndMakeVisible(appSearchEditor);
     settingsPanel->addAndMakeVisible(autoEnableToggle);
+    settingsPanel->addAndMakeVisible(autoListenOnAutoEnableToggle);
     settingsPanel->addAndMakeVisible(refreshAppsButton);
     settingsPanel->addAndMakeVisible(appListBox);
     settingsPanel->addAndMakeVisible(enabledProgramsListBox);
@@ -1471,6 +1526,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
             cachedSettings.vstSearchPaths.addIfNotAlreadyThere(folder.getFullPathName());
     }
     autoEnableToggle.setToggleState(cachedSettings.autoEnableByApp, juce::dontSendNotification);
+    autoListenOnAutoEnableToggle.setToggleState(cachedSettings.autoListenOnAutoEnable, juce::dontSendNotification);
     autoDownloadUpdatesToggle.setToggleState(cachedSettings.autoInstallUpdates, juce::dontSendNotification);
     autoSaveDraftToggle.setToggleState(cachedSettings.autoSaveDraftRecovery, juce::dontSendNotification);
     lightModeToggle.setToggleState(cachedSettings.lightMode, juce::dontSendNotification);
@@ -1534,6 +1590,19 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 
     uiTimerHz = 30;
     startTimerHz(uiTimerHz);
+}
+
+MainComponent::~MainComponent()
+{
+    stopTimer();
+
+    if (runningAppsThread.joinable())
+        runningAppsThread.join();
+
+    if (vstScanThread.joinable())
+        vstScanThread.join();
+
+    setLookAndFeel(nullptr);
 }
 
 void MainComponent::onWindowVisible()
@@ -1633,7 +1702,6 @@ juce::Array<juce::File> MainComponent::getDefaultVst3Folders() const
 
 void MainComponent::autoScanVstFolders()
 {
-    int total = 0;
     juce::Array<juce::File> folders;
     if (cachedSettings.vstSearchPaths.isEmpty())
     {
@@ -1645,76 +1713,153 @@ void MainComponent::autoScanVstFolders()
             folders.add(juce::File(p));
     }
 
-    for (const auto& folder : folders)
+    if (vstScanInFlight.exchange(true))
     {
-        if (! folder.isDirectory())
-            continue;
-        total += engine.getVstHost().scanFolder(folder).size();
+        setEffectsHint("VST scan already running", 60);
+        return;
     }
-    refreshKnownPlugins();
-    cachedSettings.scannedVstPaths = engine.getVstHost().getScannedPaths();
-    saveCachedSettings();
-    Logger::instance().log("Visible VST scan complete. Found " + juce::String(total));
+
+    if (vstScanThread.joinable())
+        vstScanThread.join();
+
+    setEffectsHint("Scanning VST folders...", -1);
+
+    auto* engineRef = &engine;
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    vstScanThread = std::thread([safeThis, engineRef, folders = std::move(folders)]() mutable
+    {
+        try
+        {
+            int total = 0;
+            for (const auto& folder : folders)
+            {
+                if (! folder.isDirectory())
+                    continue;
+                total += engineRef->getVstHost().scanFolder(folder).size();
+            }
+
+            juce::MessageManager::callAsync([safeThis, total]
+            {
+                if (safeThis == nullptr)
+                    return;
+
+                safeThis->refreshKnownPlugins();
+                safeThis->cachedSettings.scannedVstPaths = safeThis->engine.getVstHost().getScannedPaths();
+                safeThis->saveCachedSettings();
+                safeThis->vstScanInFlight.store(false);
+                safeThis->setEffectsHint("VST scan complete (" + juce::String(total) + " found)", 90);
+                Logger::instance().log("Visible VST scan complete. Found " + juce::String(total));
+            });
+        }
+        catch (...)
+        {
+            juce::MessageManager::callAsync([safeThis]
+            {
+                if (safeThis == nullptr)
+                    return;
+
+                safeThis->vstScanInFlight.store(false);
+                safeThis->setEffectsHint("VST scan failed", 90);
+            });
+            Logger::instance().log("Visible VST scan failed due to an unexpected error.");
+        }
+    });
 }
 
 void MainComponent::refreshRunningApps()
 {
-    runningApps.clear();
-#if JUCE_WINDOWS
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap != INVALID_HANDLE_VALUE)
-    {
-        PROCESSENTRY32 pe {};
-        pe.dwSize = sizeof(pe);
-        if (Process32First(snap, &pe))
-        {
-            do
-            {
-                juce::String exe(pe.szExeFile);
-                if (exe.isNotEmpty())
-                {
-                    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
-                    juce::String path;
-                    if (h != nullptr)
-                    {
-                        WCHAR buf[MAX_PATH];
-                        DWORD len = MAX_PATH;
-                        if (QueryFullProcessImageNameW(h, 0, buf, &len))
-                            path = juce::String(buf);
-                        CloseHandle(h);
-                    }
+    if (runningAppsRefreshInFlight.exchange(true))
+        return;
 
-                    if (path.isNotEmpty())
+    if (runningAppsThread.joinable())
+        runningAppsThread.join();
+
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    runningAppsThread = std::thread([safeThis]
+    {
+        try
+        {
+            std::vector<MainComponent::RunningAppEntry> refreshed;
+#if JUCE_WINDOWS
+            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (snap != INVALID_HANDLE_VALUE)
+            {
+                PROCESSENTRY32 pe {};
+                pe.dwSize = sizeof(pe);
+                if (Process32First(snap, &pe))
+                {
+                    do
                     {
-                        bool exists = false;
-                        for (const auto& a : runningApps)
+                        juce::String exe(pe.szExeFile);
+                        if (exe.isEmpty())
+                            continue;
+
+                        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+                        juce::String path;
+                        if (h != nullptr)
                         {
-                            if (a.path.equalsIgnoreCase(path))
+                            WCHAR buf[MAX_PATH];
+                            DWORD len = MAX_PATH;
+                            if (QueryFullProcessImageNameW(h, 0, buf, &len))
+                                path = juce::String(buf);
+                            CloseHandle(h);
+                        }
+
+                        if (path.isEmpty())
+                            continue;
+
+                        bool exists = false;
+                        for (const auto& app : refreshed)
+                        {
+                            if (app.path.equalsIgnoreCase(path))
                             {
                                 exists = true;
                                 break;
                             }
                         }
-                        if (! exists)
-                        {
-                            RunningAppEntry entry;
-                            entry.name = exe;
-                            entry.path = path;
-                            entry.icon = extractAppIcon(path);
-                            runningApps.push_back(std::move(entry));
-                        }
-                    }
+
+                        if (exists)
+                            continue;
+
+                        MainComponent::RunningAppEntry entry;
+                        entry.name = exe;
+                        entry.path = path;
+                        entry.icon = extractIconForExecutable(path);
+                        refreshed.push_back(std::move(entry));
+                    } while (Process32Next(snap, &pe));
                 }
-            } while (Process32Next(snap, &pe));
-        }
-        CloseHandle(snap);
-    }
+
+                CloseHandle(snap);
+            }
 #endif
-    std::sort(runningApps.begin(), runningApps.end(), [](const RunningAppEntry& a, const RunningAppEntry& b)
-    {
-        return a.name.compareIgnoreCase(b.name) < 0;
+
+            std::sort(refreshed.begin(), refreshed.end(), [](const MainComponent::RunningAppEntry& a, const MainComponent::RunningAppEntry& b)
+            {
+                return a.name.compareIgnoreCase(b.name) < 0;
+            });
+
+            juce::MessageManager::callAsync([safeThis, refreshed = std::move(refreshed)]() mutable
+            {
+                if (safeThis == nullptr)
+                    return;
+
+                safeThis->runningApps = std::move(refreshed);
+                safeThis->runningAppsRefreshInFlight.store(false);
+                safeThis->refreshProgramsList();
+            });
+        }
+        catch (...)
+        {
+            juce::MessageManager::callAsync([safeThis]
+            {
+                if (safeThis == nullptr)
+                    return;
+
+                safeThis->runningAppsRefreshInFlight.store(false);
+            });
+            Logger::instance().log("Running app refresh failed due to an unexpected error.");
+        }
     });
-    refreshProgramsList();
 }
 
 std::vector<int> MainComponent::filterRunningAppIndices(const juce::String& query) const
@@ -1931,56 +2076,6 @@ void MainComponent::removeSelectedProgram()
     refreshEnabledProgramsList();
 }
 
-juce::Image MainComponent::extractAppIcon(const juce::String& exePath) const
-{
-#if JUCE_WINDOWS
-    HICON smallIcon = nullptr;
-    if (ExtractIconExW(exePath.toWideCharPointer(), 0, nullptr, &smallIcon, 1) > 0 && smallIcon != nullptr)
-    {
-        juce::Image image = juce::Image(juce::Image::ARGB, 16, 16, true);
-        juce::Image::BitmapData bd(image, juce::Image::BitmapData::writeOnly);
-
-        BITMAPV5HEADER bi {};
-        bi.bV5Size = sizeof(BITMAPV5HEADER);
-        bi.bV5Width = 16;
-        bi.bV5Height = -16;
-        bi.bV5Planes = 1;
-        bi.bV5BitCount = 32;
-        bi.bV5Compression = BI_BITFIELDS;
-        bi.bV5RedMask = 0x00FF0000;
-        bi.bV5GreenMask = 0x0000FF00;
-        bi.bV5BlueMask = 0x000000FF;
-        bi.bV5AlphaMask = 0xFF000000;
-
-        void* bits = nullptr;
-        auto hdc = GetDC(nullptr);
-        auto hbm = CreateDIBSection(hdc, reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS, &bits, nullptr, 0);
-        auto mem = CreateCompatibleDC(hdc);
-        auto old = SelectObject(mem, hbm);
-        DrawIconEx(mem, 0, 0, smallIcon, 16, 16, 0, nullptr, DI_NORMAL);
-
-        auto* src = static_cast<const uint8_t*>(bits);
-        for (int y = 0; y < 16; ++y)
-        {
-            for (int x = 0; x < 16; ++x)
-            {
-                const auto i = (y * 16 + x) * 4;
-                const juce::Colour c(src[i + 2], src[i + 1], src[i + 0], src[i + 3]);
-                bd.setPixelColour(x, y, c);
-            }
-        }
-
-        SelectObject(mem, old);
-        DeleteDC(mem);
-        DeleteObject(hbm);
-        ReleaseDC(nullptr, hdc);
-        DestroyIcon(smallIcon);
-        return image;
-    }
-#endif
-    return {};
-}
-
 juce::String MainComponent::getForegroundProcessName() const
 {
 #if JUCE_WINDOWS
@@ -2065,6 +2160,7 @@ void MainComponent::updateSettingsTabVisibility()
                      static_cast<juce::Component*>(&enabledProgramsLabel),
                      static_cast<juce::Component*>(&appSearchEditor),
                      static_cast<juce::Component*>(&autoEnableToggle),
+                     static_cast<juce::Component*>(&autoListenOnAutoEnableToggle),
                      static_cast<juce::Component*>(&refreshAppsButton),
                      static_cast<juce::Component*>(&appListBox),
                      static_cast<juce::Component*>(&enabledProgramsListBox),
@@ -2638,6 +2734,57 @@ bool MainComponent::computeAutoEnableShouldEnable(bool& hasCondition) const
     return shouldEnable;
 }
 
+bool MainComponent::enableListenFromSettings(bool showConflictDialog)
+{
+    auto monitor = cachedSettings.listenMonitorDeviceName.trim();
+    if (monitor.isEmpty())
+        monitor = behaviorListenDeviceBox.getText().trim();
+    if (monitor.isEmpty())
+        monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
+    if (monitor.isEmpty())
+        return false;
+
+    const auto selectedOutput = getSelectedOutputDeviceName();
+    if (selectedOutput.isNotEmpty() && monitor.equalsIgnoreCase(selectedOutput))
+    {
+        auto* currentType = engine.getDeviceManager().getCurrentDeviceTypeObject();
+        if (currentType != nullptr)
+        {
+            const auto outputNames = currentType->getDeviceNames(false);
+            for (const auto& candidate : outputNames)
+            {
+                if (! candidate.equalsIgnoreCase(selectedOutput))
+                {
+                    monitor = candidate;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (selectedOutput.isNotEmpty() && monitor.equalsIgnoreCase(selectedOutput))
+    {
+        if (showConflictDialog)
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+                                                   "Listen Output",
+                                                   "Listen output must be different from the Virtual Mic output.");
+        }
+        return false;
+    }
+
+    cachedSettings.listenMonitorDeviceName = monitor;
+    saveCachedSettings();
+    refreshListenOutputDevices();
+    engine.setMonitorOutputDevice(monitor);
+    engine.setListenEnabled(true);
+
+    const auto enabled = engine.isListenEnabled();
+    routeSpeakersButton.setButtonText(enabled ? "Listening" : "Listen");
+    routeSpeakersButton.setToggleState(enabled, juce::dontSendNotification);
+    return enabled;
+}
+
 void MainComponent::setEffectsHint(const juce::String& text, int ticks)
 {
     effectsHintLabel.setText(text, juce::dontSendNotification);
@@ -2906,6 +3053,7 @@ void MainComponent::applyThemePalette()
     for (auto* t : { static_cast<juce::ToggleButton*>(&toneButton),
                      static_cast<juce::ToggleButton*>(&effectsToggle),
                      static_cast<juce::ToggleButton*>(&autoEnableToggle),
+                     static_cast<juce::ToggleButton*>(&autoListenOnAutoEnableToggle),
                      static_cast<juce::ToggleButton*>(&autoDownloadUpdatesToggle),
                      static_cast<juce::ToggleButton*>(&autoSaveDraftToggle),
                      static_cast<juce::ToggleButton*>(&startWithWindowsToggle),
@@ -3715,26 +3863,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     {
         if (! engine.isListenEnabled())
         {
-            auto monitor = cachedSettings.listenMonitorDeviceName.trim();
-            if (monitor.isEmpty())
-                monitor = behaviorListenDeviceBox.getText().trim();
-            if (monitor.isEmpty())
-                monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
-            if (monitor.isEmpty())
-                return;
-            if (monitor == getSelectedOutputDeviceName())
-            {
-                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                       "Listen Output",
-                                                       "Listen output must be different from the Virtual Mic output.");
-                return;
-            }
-            cachedSettings.listenMonitorDeviceName = monitor;
-            saveCachedSettings();
-            engine.setMonitorOutputDevice(monitor);
-            engine.setListenEnabled(true);
-            routeSpeakersButton.setButtonText("Listening");
-            routeSpeakersButton.setToggleState(true, juce::dontSendNotification);
+            enableListenFromSettings(true);
         }
         else
         {
@@ -3827,10 +3956,7 @@ void MainComponent::buttonClicked(juce::Button* button)
             if (! folder.isDirectory())
                 return;
             addVstSearchPath(folder.getFullPathName());
-            engine.getVstHost().scanFolder(folder);
-            cachedSettings.scannedVstPaths = engine.getVstHost().getScannedPaths();
-            saveCachedSettings();
-            refreshKnownPlugins();
+            autoScanVstFolders();
         });
     }
     else if (button == &toneButton)
@@ -3921,7 +4047,23 @@ void MainComponent::buttonClicked(juce::Button* button)
                 effectsToggle.setToggleState(true, juce::dontSendNotification);
                 effectsToggle.setButtonText("Effects On");
                 setEffectsHint({}, 0);
+                if (cachedSettings.autoListenOnAutoEnable && ! engine.isListenEnabled())
+                    enableListenFromSettings(false);
             }
+        }
+    }
+    else if (button == &autoListenOnAutoEnableToggle)
+    {
+        cachedSettings.autoListenOnAutoEnable = autoListenOnAutoEnableToggle.getToggleState();
+        saveCachedSettings();
+        if (cachedSettings.autoListenOnAutoEnable
+            && cachedSettings.autoEnableByApp
+            && ! engine.isListenEnabled())
+        {
+            bool hasCondition = false;
+            const auto shouldEnable = computeAutoEnableShouldEnable(hasCondition);
+            if (hasCondition && shouldEnable)
+                enableListenFromSettings(false);
         }
     }
     else if (button == &autoDownloadUpdatesToggle)
@@ -4196,6 +4338,9 @@ void MainComponent::timerCallback()
                     effectsToggle.setButtonText("Effects On");
                     setEffectsHint({}, 0);
                 }
+
+                if (cachedSettings.autoListenOnAutoEnable && ! engine.isListenEnabled())
+                    enableListenFromSettings(false);
             }
             else if (! shouldEnable)
             {
@@ -4229,6 +4374,11 @@ void MainComponent::timerCallback()
     const auto listenEnabled = engine.isListenEnabled();
     const bool listenStateChanged = (listenEnabled != lastListenEnabledState);
     lastListenEnabledState = listenEnabled;
+    if (listenStateChanged)
+    {
+        routeSpeakersButton.setButtonText(listenEnabled ? "Listening" : "Listen");
+        routeSpeakersButton.setToggleState(listenEnabled, juce::dontSendNotification);
+    }
 
     const auto muted = params.mute.load();
     const bool muteStateChanged = (muted != lastMutedState);
@@ -5010,7 +5160,7 @@ void MainComponent::resized()
             switch (activeSettingsTab)
             {
                 case 0:
-                    return h22 + h28 + gap + h20 + h28 + gap + h20 + h120 + gap
+                    return h22 + h28 + gap + h28 + gap + h20 + h28 + gap + h20 + h120 + gap
                          + h20 + h94 + gap + h28 + gap + h28 + gap + h30;
                 case 1:
                     return h22 + gap + h20 + h28 + gap + h20 + h30 + gap
@@ -5034,6 +5184,8 @@ void MainComponent::resized()
         {
             appEnableLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(22.0f * uiScale)));
             autoEnableToggle.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
+            autoListenOnAutoEnableToggle.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
             contentNoFooter.removeFromTop(gap);
             appSearchLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(20.0f * uiScale)));
             appSearchEditor.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
