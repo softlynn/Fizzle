@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.4 - Freeze/Hang Safeguards
+
+### Fixed
+- Added safe startup mode after an unclean exit: Fizzle now skips automatic last-preset plugin restore, starts with effects bypassed, and persists `Default` as the startup preset to avoid immediate re-entry into a bad plugin state.
+- Hardened executable icon extraction in running-app refresh with strict Win32 handle/null checks to avoid unstable icon decode paths.
+- Prevented shutdown hangs caused by worker thread teardown by detaching in-flight running-app and VST-scan workers instead of blocking the UI thread on join.
+
 ## v0.2.3 - Autosave Recovery Drafts
 
 ### Added

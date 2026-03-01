@@ -219,6 +219,7 @@ private:
     juce::uint32 appStartMs { 0 };
     juce::uint32 lastDraftAutosaveCheckMs { 0 };
     juce::String lastAutosaveDraftFingerprint;
+    bool safeStartupMode { false };
     struct FizzBubble
     {
         juce::Point<float> pos;
@@ -292,6 +293,9 @@ private:
     void markCurrentPresetSnapshot();
     juce::String loadPersistedLastPresetName() const;
     void persistLastPresetName(const juce::String& presetName) const;
+    juce::File getSessionLockFile() const;
+    bool beginCrashSafeSession();
+    void endCrashSafeSession();
     juce::File getAutosaveDraftFile() const;
     void saveAutosaveDraftIfNeeded(bool force);
     void clearAutosaveDraft();

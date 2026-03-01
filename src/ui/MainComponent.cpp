@@ -295,12 +295,52 @@ juce::Image extractIconForExecutable(const juce::String& exePath)
 
         void* bits = nullptr;
         auto hdc = GetDC(nullptr);
+        if (hdc == nullptr)
+        {
+            DestroyIcon(smallIcon);
+            return {};
+        }
+
         auto hbm = CreateDIBSection(hdc, reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (hbm == nullptr || bits == nullptr)
+        {
+            ReleaseDC(nullptr, hdc);
+            DestroyIcon(smallIcon);
+            return {};
+        }
+
         auto mem = CreateCompatibleDC(hdc);
+        if (mem == nullptr)
+        {
+            DeleteObject(hbm);
+            ReleaseDC(nullptr, hdc);
+            DestroyIcon(smallIcon);
+            return {};
+        }
+
         auto old = SelectObject(mem, hbm);
+        if (old == nullptr || old == HGDI_ERROR)
+        {
+            DeleteDC(mem);
+            DeleteObject(hbm);
+            ReleaseDC(nullptr, hdc);
+            DestroyIcon(smallIcon);
+            return {};
+        }
+
         DrawIconEx(mem, 0, 0, smallIcon, 16, 16, 0, nullptr, DI_NORMAL);
 
         auto* src = static_cast<const uint8_t*>(bits);
+        if (src == nullptr)
+        {
+            SelectObject(mem, old);
+            DeleteDC(mem);
+            DeleteObject(hbm);
+            ReleaseDC(nullptr, hdc);
+            DestroyIcon(smallIcon);
+            return {};
+        }
+
         for (int y = 0; y < 16; ++y)
         {
             for (int x = 0; x < 16; ++x)
@@ -1514,6 +1554,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     outputGain.setValue(params.outputGainDb.load(), juce::dontSendNotification);
 
     cachedSettings = settingsStore.loadEngineSettings();
+    safeStartupMode = beginCrashSafeSession();
     cachedSettings.themeVariant = juce::jlimit(0, 1, cachedSettings.themeVariant);
     cachedSettings.uiDensity = juce::jlimit(0, 2, cachedSettings.uiDensity);
     const auto persistedLastPreset = loadPersistedLastPresetName();
@@ -1552,8 +1593,25 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     refreshVstSearchPathList();
     refreshKnownPlugins();
     refreshPresets();
-    if (cachedSettings.lastPresetName.isNotEmpty() && cachedSettings.lastPresetName != "Default")
+    if (safeStartupMode)
+    {
+        if (cachedSettings.lastPresetName.isNotEmpty() && cachedSettings.lastPresetName != "Default")
+        {
+            Logger::instance().log("Safe startup active: skipping automatic preset load (" + cachedSettings.lastPresetName + ")");
+            cachedSettings.lastPresetName = "Default";
+            saveCachedSettings();
+            persistLastPresetName("Default");
+        }
+
+        params.bypass.store(true);
+        effectsToggle.setToggleState(false, juce::dontSendNotification);
+        effectsToggle.setButtonText("Effects Off");
+        setEffectsHint("Safe startup after unclean shutdown: effects disabled", 180);
+    }
+    else if (cachedSettings.lastPresetName.isNotEmpty() && cachedSettings.lastPresetName != "Default")
+    {
         loadPresetByName(cachedSettings.lastPresetName);
+    }
     markCurrentPresetSnapshot();
 
     if (! cachedSettings.hasSeenFirstLaunchGuide)
@@ -1597,11 +1655,32 @@ MainComponent::~MainComponent()
     stopTimer();
 
     if (runningAppsThread.joinable())
-        runningAppsThread.join();
+    {
+        if (runningAppsRefreshInFlight.load())
+        {
+            Logger::instance().log("Detaching running-apps worker during shutdown (still in flight).");
+            runningAppsThread.detach();
+        }
+        else
+        {
+            runningAppsThread.join();
+        }
+    }
 
     if (vstScanThread.joinable())
-        vstScanThread.join();
+    {
+        if (vstScanInFlight.load())
+        {
+            Logger::instance().log("Detaching VST-scan worker during shutdown (still in flight).");
+            vstScanThread.detach();
+        }
+        else
+        {
+            vstScanThread.join();
+        }
+    }
 
+    endCrashSafeSession();
     setLookAndFeel(nullptr);
 }
 
@@ -3428,6 +3507,31 @@ void MainComponent::persistLastPresetName(const juce::String& presetName) const
 {
     const auto file = settingsStore.getAppDirectory().getChildFile("last_preset.txt");
     file.replaceWithText(presetName.trim());
+}
+
+juce::File MainComponent::getSessionLockFile() const
+{
+    return settingsStore.getAppDirectory().getChildFile("session.lock");
+}
+
+bool MainComponent::beginCrashSafeSession()
+{
+    const auto file = getSessionLockFile();
+    const bool previousSessionUnclean = file.existsAsFile();
+    if (! file.replaceWithText(juce::Time::getCurrentTime().toISO8601(true)))
+        Logger::instance().log("Failed to write session lock file.");
+
+    if (previousSessionUnclean)
+        Logger::instance().log("Detected unclean previous session. Safe startup mode enabled.");
+
+    return previousSessionUnclean;
+}
+
+void MainComponent::endCrashSafeSession()
+{
+    const auto file = getSessionLockFile();
+    if (file.existsAsFile() && ! file.deleteFile())
+        Logger::instance().log("Failed to clear session lock file.");
 }
 
 juce::File MainComponent::getAutosaveDraftFile() const
