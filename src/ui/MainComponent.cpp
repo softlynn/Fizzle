@@ -2405,12 +2405,24 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
 {
     if (auto* modalMgr = juce::ModalComponentManager::getInstance())
     {
-        if (modalMgr->getNumModalComponents() > 0)
+        for (int i = modalMgr->getNumModalComponents() - 1; i >= 0; --i)
         {
-            if (auto* modal = modalMgr->getModalComponent(0))
+            if (auto* modal = modalMgr->getModalComponent(i))
             {
-                if (modal != this)
-                    return;
+                if (modal == this)
+                    continue;
+
+                // Hidden modal components can remain after failed/off-screen prompts and
+                // make the app appear frozen. Clear those stale blockers on demand.
+                if (! modal->isShowing())
+                {
+                    Logger::instance().log("Clearing hidden modal blocker.");
+                    modal->exitModalState(0);
+                    continue;
+                }
+
+                modal->toFront(true);
+                return;
             }
         }
     }
@@ -4370,6 +4382,44 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 
 void MainComponent::timerCallback()
 {
+    if (auto* modalMgr = juce::ModalComponentManager::getInstance())
+    {
+        for (int i = modalMgr->getNumModalComponents() - 1; i >= 0; --i)
+        {
+            auto* modal = modalMgr->getModalComponent(i);
+            if (modal == nullptr || modal == this)
+                continue;
+
+            if (! modal->isShowing())
+            {
+                Logger::instance().log("Clearing hidden modal blocker (timer).");
+                modal->exitModalState(0);
+                continue;
+            }
+
+            const auto modalBounds = modal->getScreenBounds();
+            bool intersectsDisplay = false;
+            for (const auto& display : juce::Desktop::getInstance().getDisplays().displays)
+            {
+                if (display.userArea.intersects(modalBounds))
+                {
+                    intersectsDisplay = true;
+                    break;
+                }
+            }
+
+            if (! intersectsDisplay)
+            {
+                Logger::instance().log("Recentering off-screen modal blocker.");
+                auto targetCentre = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea.getCentre();
+                if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+                    targetCentre = window->getScreenBounds().getCentre();
+                modal->setCentrePosition(targetCentre);
+                modal->toFront(true);
+            }
+        }
+    }
+
     auto setTimerRate = [this](int desired)
     {
         if (desired != uiTimerHz)
