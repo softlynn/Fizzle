@@ -89,6 +89,12 @@ void MainWindow::resized()
     applyRoundedWindowRegion();
 }
 
+void MainWindow::inputAttemptWhenModal()
+{
+    if (auto* main = getMainComponent())
+        main->inputAttemptWhenModal();
+}
+
 void MainWindow::applyWindowsBackdrop(bool transparent)
 {
 #if JUCE_WINDOWS

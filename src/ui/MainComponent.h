@@ -30,6 +30,7 @@ public:
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
+    void inputAttemptWhenModal() override;
     bool keyPressed(const juce::KeyPress& key) override;
 
     void refreshPresets();
@@ -320,5 +321,6 @@ private:
     void applyUiDensity();
     void refreshAppearanceControls();
     void scrollSettingsContent(int deltaPixels);
+    bool recoverFromModalBlockers(bool aggressive);
 };
 }

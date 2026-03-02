@@ -15,6 +15,7 @@ public:
     void closeButtonPressed() override;
     void visibilityChanged() override;
     void resized() override;
+    void inputAttemptWhenModal() override;
     juce::BorderSize<int> getContentComponentBorder() const override;
     juce::BorderSize<int> getBorderThickness() const override;
     void setTransparentBackgroundEnabled(bool enabled);

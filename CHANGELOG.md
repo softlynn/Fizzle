@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.5 - Resize Freeze Hardening
+
+### Fixed
+- Reworked modal-blocker recovery so stale modal components are detected and cleared using stronger checks (visibility/showing/desktop/peer/alpha/bounds), preventing resize-only frozen UI states.
+- Hooked modal recovery into `inputAttemptWhenModal` at both main-component and window levels so blocked input attempts can self-heal even when normal mouse handlers are bypassed.
+- Added recovery runs on window re-show and timer ticks to clean up stale modal state proactively.
+- Replaced first-launch guide's manually managed modal lifecycle with async message-box flow to reduce stuck-modal risk.
+
+### Changed
+- Expanded modal recovery logging with component metadata for faster diagnosis if blocking recurs.
+
 ## v0.2.4 - Freeze/Hang Safeguards
 
 ### Fixed
