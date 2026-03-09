@@ -14,6 +14,16 @@ public:
         startTimerHz(20);
     }
 
+    void setRefreshActive(bool active)
+    {
+        const auto desiredHz = active ? 20 : 2;
+        if (desiredHz == refreshHz)
+            return;
+
+        refreshHz = desiredHz;
+        startTimerHz(refreshHz);
+    }
+
     void setLevel(float newLevel)
     {
         target.store(juce::jlimit(0.0f, 1.0f, newLevel));
@@ -39,6 +49,7 @@ public:
 private:
     std::atomic<float> target { 0.0f };
     std::atomic<float> displayed { 0.0f };
+    int refreshHz { 20 };
 
     void timerCallback() override
     {

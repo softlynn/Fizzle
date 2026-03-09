@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.6 - Glass + Ship Fixes
+
+### Fixed
+- Shipped the current freeze hardening to the Windows build so local installs no longer stay on the older `0.2.4`/`0.1.8` binaries that were still producing the hangs seen in Windows Error Reporting.
+- Reworked transparent background mode to use a stronger native Windows acrylic/backdrop path so the beta option reads as actual glass instead of a mostly opaque tint.
+
+### Changed
+- Reduced tray/hidden-window CPU usage by throttling the main UI, meter, and diagnostics refresh timers when Fizzle is not visible.
+
 ## v0.2.5 - Resize Freeze Hardening
 
 ### Fixed

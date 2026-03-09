@@ -21,6 +21,16 @@ public:
         startTimerHz(4);
     }
 
+    void setRefreshActive(bool active)
+    {
+        const auto desiredHz = active ? 4 : 1;
+        if (desiredHz == refreshHz)
+            return;
+
+        refreshHz = desiredHz;
+        startTimerHz(refreshHz);
+    }
+
     void applyStyle(float uiScale)
     {
         text.setColour(juce::TextEditor::backgroundColourId, theme::panel.withAlpha(0.55f));
@@ -52,6 +62,7 @@ private:
     AudioEngine& engine;
     juce::TextEditor text;
     juce::String lastText;
+    int refreshHz { 4 };
 
     void timerCallback() override
     {

@@ -1714,6 +1714,9 @@ MainComponent::~MainComponent()
 
 void MainComponent::onWindowVisible()
 {
+    meterIn.setRefreshActive(true);
+    meterOut.setRefreshActive(true);
+    diagnostics.setRefreshActive(true);
     applyThemePalette();
     recoverFromModalBlockers(true);
 
@@ -1739,6 +1742,13 @@ void MainComponent::onWindowVisible()
         cachedSettings.scannedVstPaths = engine.getVstHost().getScannedPaths();
         saveCachedSettings();
     }
+}
+
+void MainComponent::onWindowHidden()
+{
+    meterIn.setRefreshActive(false);
+    meterOut.setRefreshActive(false);
+    diagnostics.setRefreshActive(false);
 }
 
 bool MainComponent::areEffectsEnabled() const
@@ -3070,7 +3080,7 @@ void MainComponent::applyThemePalette()
         kUiMint = lightMode ? juce::Colour(0xff66aac8) : juce::Colour(0xff9af7d8);
     }
 
-    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.82f : 0.78f) : 1.0f;
+    kUiBackgroundAlphaScale = cachedSettings.transparentBackground ? (lightMode ? 0.72f : 0.68f) : 1.0f;
 
     theme::background = kUiBg;
     theme::panel = kUiPanel;
@@ -4455,7 +4465,9 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 
 void MainComponent::timerCallback()
 {
-    recoverFromModalBlockers(false);
+    const bool windowVisible = isShowing();
+    if (windowVisible)
+        recoverFromModalBlockers(false);
 
     auto setTimerRate = [this](int desired)
     {
@@ -4732,7 +4744,8 @@ void MainComponent::timerCallback()
                               || aboutFlashAlpha > 0.02f
                               || effectsHintAlpha > 0.02f
                               || effectsHintTargetAlpha > 0.02f;
-    const bool dividerAnimationNeeded = ! highFpsNeeded
+    const bool dividerAnimationNeeded = windowVisible
+                                     && ! highFpsNeeded
                                      && ! mediumFpsNeeded
                                      && ! (settingsPanel != nullptr && settingsPanel->isVisible() && settingsPanelAlpha > 0.02f)
                                      && (uiTickCount % 4 == 0);
@@ -4743,7 +4756,8 @@ void MainComponent::timerCallback()
         addDirty(headerBounds.expanded(18, 10));
     }
 
-    setTimerRate(highFpsNeeded ? 60 : (mediumFpsNeeded ? 30 : 15));
+    const int idleHz = windowVisible ? 10 : 2;
+    setTimerRate(highFpsNeeded ? 60 : (mediumFpsNeeded ? 30 : idleHz));
 
     if (hasDirty)
         repaint(dirty);
@@ -4807,7 +4821,7 @@ void MainComponent::paint(juce::Graphics& g)
 
     const bool lowCostPass = draggingWindow || draggingResizeGrip;
     const bool lightMode = cachedSettings.lightMode;
-    const float shellBaseAlpha = transparentMode ? (lightMode ? 0.86f : 0.82f) : 1.0f;
+    const float shellBaseAlpha = transparentMode ? (lightMode ? 0.68f : 0.62f) : 1.0f;
     const auto bgTop = transparentMode ? kUiBg.brighter(lightMode ? 0.05f : 0.02f) : kUiBg.brighter(0.05f);
     const auto bgBottom = transparentMode ? kUiBg.darker(lightMode ? 0.10f : 0.12f) : kUiBg.darker(0.14f);
     juce::ColourGradient bg(bgTop.withAlpha(shellBaseAlpha * kUiBackgroundAlphaScale),
@@ -4818,7 +4832,13 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillPath(shellPath);
     if (transparentMode)
     {
-        g.setColour(juce::Colours::black.withAlpha(lightMode ? 0.11f : 0.10f));
+        g.setColour(juce::Colours::black.withAlpha(lightMode ? 0.08f : 0.11f));
+        g.fillPath(shellPath);
+        juce::ColourGradient backdropGlow(kUiAccentSoft.withAlpha(lightMode ? 0.09f : 0.07f),
+                                          shell.getX(), shell.getY(),
+                                          juce::Colours::transparentBlack,
+                                          shell.getRight(), shell.getBottom(), false);
+        g.setGradientFill(backdropGlow);
         g.fillPath(shellPath);
     }
     if (! lowCostPass)
@@ -4834,8 +4854,8 @@ void MainComponent::paint(juce::Graphics& g)
     g.strokePath(makePanelPath(shell.expanded(0.9f, 0.8f), shellRadius + 0.8f), juce::PathStrokeType(transparentMode ? 1.05f : 0.9f));
 
     auto card = shell.reduced(2.0f, 1.0f);
-    const auto cardTopAlpha = transparentMode ? (lightMode ? 0.78f : 0.72f) : 0.90f;
-    const auto cardBottomAlpha = transparentMode ? (lightMode ? 0.84f : 0.78f) : 0.96f;
+    const auto cardTopAlpha = transparentMode ? (lightMode ? 0.56f : 0.50f) : 0.90f;
+    const auto cardBottomAlpha = transparentMode ? (lightMode ? 0.66f : 0.58f) : 0.96f;
     juce::ColourGradient cardFill(kUiPanelSoft.withAlpha(cardTopAlpha * kUiBackgroundAlphaScale), card.getX(), card.getY(),
                                   kUiPanel.withAlpha(cardBottomAlpha * kUiBackgroundAlphaScale), card.getX(), card.getBottom(), false);
     g.setGradientFill(cardFill);
@@ -4845,7 +4865,7 @@ void MainComponent::paint(juce::Graphics& g)
         g.setTiledImageFill(getDitherNoiseTile(), 0, 0, transparentMode ? 0.014f : 0.020f);
         g.fillPath(makePanelPath(card, 21.0f));
 
-        juce::ColourGradient gloss(juce::Colours::white.withAlpha(transparentMode ? 0.12f : 0.08f),
+        juce::ColourGradient gloss(juce::Colours::white.withAlpha(transparentMode ? 0.18f : 0.08f),
                                    card.getX(), card.getY(),
                                    juce::Colours::white.withAlpha(0.0f),
                                    card.getX(), card.getY() + card.getHeight() * 0.38f, false);
@@ -4860,20 +4880,20 @@ void MainComponent::paint(juce::Graphics& g)
     headerPath.addRoundedRectangle(headerBand.getX(), headerBand.getY(), headerBand.getWidth(), headerBand.getHeight(),
                                    15.0f, 15.0f,
                                    true, true, false, false);
-    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(transparentMode ? 0.68f : 0.52f), headerBand.getX(), headerBand.getY(),
-                                    kUiPanel.withAlpha(transparentMode ? 0.32f : 0.07f), headerBand.getX(), headerBand.getBottom(), false);
+    juce::ColourGradient headerFill(kUiPanelSoft.withAlpha(transparentMode ? 0.46f : 0.52f), headerBand.getX(), headerBand.getY(),
+                                    kUiPanel.withAlpha(transparentMode ? 0.18f : 0.07f), headerBand.getX(), headerBand.getBottom(), false);
     g.setGradientFill(headerFill);
     g.fillPath(headerPath);
     g.setColour(kUiAccent.withAlpha(transparentMode ? 0.16f : 0.11f));
     g.strokePath(headerPath, juce::PathStrokeType(0.9f));
 
     auto chainPane = vstChainList.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.018f : 0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.030f : 0.02f));
     g.fillRoundedRectangle(chainPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.16f));
     g.drawRoundedRectangle(chainPane, 10.0f, 1.1f);
     auto diagPane = diagnostics.getBounds().toFloat().expanded(2.0f, 3.0f);
-    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.018f : 0.02f));
+    g.setColour(juce::Colours::white.withAlpha(transparentMode ? 0.030f : 0.02f));
     g.fillRoundedRectangle(diagPane, 10.0f);
     g.setColour(kUiAccent.withAlpha(0.14f));
     g.drawRoundedRectangle(diagPane, 10.0f, 1.1f);

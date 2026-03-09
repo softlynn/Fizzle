@@ -35,6 +35,7 @@ public:
 
     void refreshPresets();
     void onWindowVisible();
+    void onWindowHidden();
     void trayToggleEffectsBypass();
     void trayToggleMute();
     void trayRestartAudio();
