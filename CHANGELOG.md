@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.7 - Routing + Persistence + CPU Reduction
+
+### Fixed
+- Restricted `Fizzle Mic` detection/default routing to the actual VB-Audio virtual cable output instead of broadly matching unrelated virtual devices.
+- Preset selection now persists cleanly without overriding the current input mic/output hardware choices on load or after close/reopen.
+- Input mic selection and current audio-device state are now persisted more reliably across hide/close/shutdown.
+- Listen routing now prefers a real monitor device and avoids reusing the virtual mic output.
+
+### Changed
+- Reduced realtime CPU usage by removing the always-on device-rate <-> 48 kHz resampling path and processing directly at the active device format.
+- Trimmed avoidable audio callback work to reduce UI starvation when the system is already under heavy CPU load.
+
 ## v0.2.6 - Glass + Ship Fixes
 
 ### Fixed

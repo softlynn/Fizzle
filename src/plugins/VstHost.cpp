@@ -489,6 +489,12 @@ std::vector<VstHost::HostedPluginHandle> VstHost::getChainHandles() const
     return copyChainSnapshot();
 }
 
+int VstHost::getPluginCount() const
+{
+    const juce::ScopedLock sl(chainLock);
+    return static_cast<int>(chain.size());
+}
+
 void VstHost::prepare(double sampleRate, int blockSize)
 {
     sanitizeProcessingFormat(sampleRate, blockSize);

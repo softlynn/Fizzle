@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "DeviceRouting.h"
 
 namespace fizzle
 {
@@ -41,21 +42,24 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
     {
         const auto inputs = type->getDeviceNames(true);
         const auto outputs = type->getDeviceNames(false);
+        const auto preferredVirtualMic = findPreferredVirtualMicOutput(outputs);
 
         if (nextSettings.inputDeviceName.isEmpty() && inputs.size() > 0)
             nextSettings.inputDeviceName = inputs[0];
 
         bool outputExists = outputs.contains(nextSettings.outputDeviceName);
-        if (! outputExists)
+        const bool outputIsPreferredVirtual = isPreferredVirtualMicOutputName(nextSettings.outputDeviceName);
+        if (preferredVirtualMic.isNotEmpty() && (! outputExists || ! outputIsPreferredVirtual))
         {
-            for (const auto& out : outputs)
+            nextSettings.outputDeviceName = preferredVirtualMic;
+            outputExists = true;
+        }
+        else if (! outputExists)
+        {
+            if (outputs.size() > 0)
             {
-                if (out.containsIgnoreCase("vb-cable") || out.containsIgnoreCase("cable input") || out.containsIgnoreCase("virtual"))
-                {
-                    nextSettings.outputDeviceName = out;
-                    outputExists = true;
-                    break;
-                }
+                nextSettings.outputDeviceName = outputs[0];
+                outputExists = true;
             }
         }
 
@@ -236,6 +240,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
                                                    int numSamples,
                                                    const juce::AudioIODeviceCallbackContext&)
 {
+    juce::ScopedNoDenormals noDenormals;
     const juce::SpinLock::ScopedTryLockType ioLock(ioCallbackLock);
     if (! ioLock.isLocked() || deviceReconfiguring.load())
     {
@@ -261,6 +266,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         return;
     }
 
+    const auto processChannels = juce::jmax(2, juce::jmax(numInputChannels, numOutputChannels));
     inBuffer.setSize(juce::jmax(1, numInputChannels), numSamples, false, false, true);
     for (int ch = 0; ch < numInputChannels; ++ch)
     {
@@ -272,14 +278,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 
     const auto deviceRate = currentDeviceSampleRate.load();
     const auto safeDeviceRate = (deviceRate > 1000.0) ? deviceRate : kInternalSampleRate;
-
-    const auto internalSamples = static_cast<int>(std::ceil((static_cast<double>(numSamples) * kInternalSampleRate) / safeDeviceRate));
-    internalBuffer.setSize(2, juce::jmax(1, internalSamples), false, false, true);
+    internalBuffer.setSize(processChannels, numSamples, false, false, true);
     internalBuffer.clear();
-
-    resampler.process(inBuffer, internalBuffer, safeDeviceRate, kInternalSampleRate);
-    if (numInputChannels <= 1 && internalBuffer.getNumChannels() > 1)
-        internalBuffer.copyFrom(1, 0, internalBuffer, 0, 0, internalBuffer.getNumSamples());
+    for (int ch = 0; ch < numInputChannels; ++ch)
+        internalBuffer.copyFrom(ch, 0, inBuffer, ch, 0, numSamples);
+    if (numInputChannels == 1 && internalBuffer.getNumChannels() > 1)
+        internalBuffer.copyFrom(1, 0, internalBuffer, 0, 0, numSamples);
 
     float inPeak = 0.0f;
     for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
@@ -287,7 +291,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 
     if (testToneEnabled.load())
     {
-        const auto phaseDelta = juce::MathConstants<double>::twoPi * 440.0 / kInternalSampleRate;
+        const auto phaseDelta = juce::MathConstants<double>::twoPi * 440.0 / safeDeviceRate;
         auto phase = tonePhase.load();
         for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
         {
@@ -308,18 +312,16 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 
     internalBuffer.applyGain(juce::Decibels::decibelsToGain(params->outputGainDb.load()));
 
-    outBuffer.setSize(juce::jmax(1, numOutputChannels), numSamples, false, false, true);
-    outBuffer.clear();
-    resampler.process(internalBuffer, outBuffer, kInternalSampleRate, safeDeviceRate);
-
     float outPeak = 0.0f;
-    for (int c = 0; c < outBuffer.getNumChannels(); ++c)
-        outPeak = juce::jmax(outPeak, outBuffer.getMagnitude(c, 0, outBuffer.getNumSamples()));
+    for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
+        outPeak = juce::jmax(outPeak, internalBuffer.getMagnitude(c, 0, internalBuffer.getNumSamples()));
 
     for (int ch = 0; ch < numOutputChannels; ++ch)
     {
         if (outputChannelData[ch] != nullptr)
-            juce::FloatVectorOperations::copy(outputChannelData[ch], outBuffer.getReadPointer(juce::jmin(ch, outBuffer.getNumChannels() - 1)), numSamples);
+            juce::FloatVectorOperations::copy(outputChannelData[ch],
+                                              internalBuffer.getReadPointer(juce::jmin(ch, internalBuffer.getNumChannels() - 1)),
+                                              numSamples);
     }
 
     if (listenEnabled.load())
@@ -329,7 +331,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         for (int c = 0; c < 2; ++c)
         {
             auto* fifo = monitorFifoBuffer.getWritePointer(c);
-            const auto* src = outBuffer.getReadPointer(juce::jmin(c, outBuffer.getNumChannels() - 1));
+            const auto* src = internalBuffer.getReadPointer(juce::jmin(c, internalBuffer.getNumChannels() - 1));
             if (size1 > 0)
                 juce::FloatVectorOperations::copy(fifo + start1, src, size1);
             if (size2 > 0)
@@ -364,11 +366,10 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     const auto rawRate = device != nullptr ? device->getCurrentSampleRate() : kInternalSampleRate;
     const auto sampleRate = rawRate > 1000.0 ? rawRate : kInternalSampleRate;
     const auto deviceBuffer = device != nullptr ? juce::jmax(1, device->getCurrentBufferSizeSamples()) : 256;
-    const auto internalBlock = static_cast<int>(std::ceil((static_cast<double>(deviceBuffer) * kInternalSampleRate) / sampleRate));
     currentDeviceSampleRate.store(sampleRate);
-    chain.prepare(kInternalSampleRate, 2);
+    chain.prepare(sampleRate, 2);
     chain.reset();
-    vstHost.prepare(kInternalSampleRate, juce::jmax(64, internalBlock));
+    vstHost.prepare(sampleRate, juce::jmax(64, deviceBuffer));
 
     if (device != nullptr)
     {

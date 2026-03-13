@@ -155,6 +155,7 @@ private:
     bool settingsPanelTargetVisible { false };
     juce::String currentPresetName { "Default" };
     juce::String pendingPresetName;
+    juce::String preferredVirtualMicOutputName;
     int dragFromRow { -1 };
     int dragToRow { -1 };
     int uiTickCount { 0 };
@@ -262,6 +263,7 @@ private:
     void refreshProgramsList();
     void refreshEnabledProgramsList();
     void refreshListenOutputDevices();
+    void persistSessionState();
     void refreshVstSearchPathList();
     void addVstSearchPath(const juce::String& path);
     void removeSelectedVstSearchPath();

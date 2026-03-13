@@ -47,6 +47,7 @@ public:
     HostedPlugin* getPlugin(int index);
     HostedPluginHandle getPluginHandle(int index);
     std::vector<HostedPluginHandle> getChainHandles() const;
+    int getPluginCount() const;
     void prepare(double sampleRate, int blockSize);
     void release();
 

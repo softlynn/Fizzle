@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "MainWindow.h"
 #include "Theme.h"
+#include "../audio/DeviceRouting.h"
 #include "../core/Logger.h"
 #include <BinaryData.h>
 #include <array>
@@ -43,11 +44,10 @@ PluginRuntimeFormat getPluginRuntimeFormat(const Diagnostics& diagnostics)
 {
     const auto deviceRate = diagnostics.sampleRate > 1000.0 ? diagnostics.sampleRate : kInternalSampleRate;
     const auto deviceBlock = diagnostics.bufferSize > 0 ? diagnostics.bufferSize : kDefaultBlockSize;
-    const auto internalBlock = static_cast<int>(std::ceil((static_cast<double>(deviceBlock) * kInternalSampleRate) / deviceRate));
 
     PluginRuntimeFormat out;
-    out.sampleRate = kInternalSampleRate;
-    out.blockSize = juce::jmax(64, internalBlock);
+    out.sampleRate = deviceRate;
+    out.blockSize = juce::jmax(64, deviceBlock);
     return out;
 }
 
@@ -1681,6 +1681,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 MainComponent::~MainComponent()
 {
     stopTimer();
+    persistSessionState();
 
     if (runningAppsThread.joinable())
     {
@@ -1746,6 +1747,7 @@ void MainComponent::onWindowVisible()
 
 void MainComponent::onWindowHidden()
 {
+    persistSessionState();
     meterIn.setRefreshActive(false);
     meterOut.setRefreshActive(false);
     diagnostics.setRefreshActive(false);
@@ -2075,9 +2077,9 @@ void MainComponent::refreshListenOutputDevices()
         behaviorListenDeviceBox.addItem(name, id++);
     }
 
-    juce::String selected = cachedSettings.listenMonitorDeviceName;
-    if (selected.isEmpty())
-        selected = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
+    juce::String selected = cachedSettings.listenMonitorDeviceName.trim();
+    if (selected.isEmpty() || ! outputNames.contains(selected) || isPreferredVirtualMicOutputName(selected))
+        selected = findPreferredMonitorOutput(outputNames, getSelectedOutputDeviceName());
 
     if (selected.isNotEmpty())
     {
@@ -2237,6 +2239,23 @@ juce::String MainComponent::getForegroundProcessPath() const
 void MainComponent::saveCachedSettings()
 {
     settingsStore.saveEngineSettings(cachedSettings);
+}
+
+void MainComponent::persistSessionState()
+{
+    const auto current = engine.currentSettings();
+    if (current.inputDeviceName.isNotEmpty())
+        cachedSettings.inputDeviceName = current.inputDeviceName;
+    if (current.outputDeviceName.isNotEmpty())
+        cachedSettings.outputDeviceName = current.outputDeviceName;
+    if (current.bufferSize > 0)
+        cachedSettings.bufferSize = current.bufferSize;
+    if (current.preferredSampleRate > 0.0)
+        cachedSettings.preferredSampleRate = current.preferredSampleRate;
+
+    cachedSettings.lastPresetName = currentPresetName.isNotEmpty() ? currentPresetName : "Default";
+    saveCachedSettings();
+    persistLastPresetName(cachedSettings.lastPresetName);
 }
 
 void MainComponent::setSettingsPanelVisible(bool visible)
@@ -2657,6 +2676,7 @@ void MainComponent::loadDeviceLists()
 
     const auto inputNames = currentType->getDeviceNames(true);
     const auto outputNames = currentType->getDeviceNames(false);
+    preferredVirtualMicOutputName = findPreferredVirtualMicOutput(outputNames);
 
     int id = 1;
     for (const auto& name : inputNames)
@@ -2679,6 +2699,12 @@ void MainComponent::loadDeviceLists()
     if (current.outputDeviceName.isNotEmpty())
     {
         const auto outputIndex = outputDeviceRealNames.indexOf(current.outputDeviceName);
+        if (outputIndex >= 0)
+            outputBox.setSelectedId(outputIndex + 1, juce::dontSendNotification);
+    }
+    else if (preferredVirtualMicOutputName.isNotEmpty())
+    {
+        const auto outputIndex = outputDeviceRealNames.indexOf(preferredVirtualMicOutputName);
         if (outputIndex >= 0)
             outputBox.setSelectedId(outputIndex + 1, juce::dontSendNotification);
     }
@@ -2741,7 +2767,8 @@ void MainComponent::applySettingsFromControls()
     cachedSettings.inputDeviceName = applied.inputDeviceName;
     cachedSettings.outputDeviceName = applied.outputDeviceName;
     cachedSettings.bufferSize = applied.bufferSize;
-    saveCachedSettings();
+    cachedSettings.preferredSampleRate = applied.preferredSampleRate;
+    persistSessionState();
     loadDeviceLists();
 }
 
@@ -2751,6 +2778,8 @@ juce::String MainComponent::findOutputByMatch(const juce::StringArray& candidate
     int bestScore = -1;
     for (int i = 0; i < outputDeviceRealNames.size(); ++i)
     {
+        if (isPreferredVirtualMicOutputName(outputDeviceRealNames[i]))
+            continue;
         const auto itemText = outputDeviceRealNames[i].toLowerCase();
         int score = 0;
         for (const auto& c : candidates)
@@ -2775,15 +2804,13 @@ juce::String MainComponent::getSelectedOutputDeviceName() const
 
 bool MainComponent::isVirtualMicName(const juce::String& outputName) const
 {
-    return outputName.containsIgnoreCase("vb")
-        || outputName.containsIgnoreCase("cable")
-        || outputName.containsIgnoreCase("virtual")
-        || outputName.containsIgnoreCase("fizzle mic");
+    return isPreferredVirtualMicOutputName(outputName)
+        || (preferredVirtualMicOutputName.isNotEmpty() && outputName.equalsIgnoreCase(preferredVirtualMicOutputName));
 }
 
 juce::String MainComponent::getDisplayOutputName(const juce::String& realOutputName) const
 {
-    if (isVirtualMicName(realOutputName))
+    if (preferredVirtualMicOutputName.isNotEmpty() && realOutputName.equalsIgnoreCase(preferredVirtualMicOutputName))
         return "Fizzle Mic";
     return realOutputName;
 }
@@ -2914,26 +2941,18 @@ bool MainComponent::enableListenFromSettings(bool showConflictDialog)
     if (monitor.isEmpty())
         monitor = behaviorListenDeviceBox.getText().trim();
     if (monitor.isEmpty())
-        monitor = findOutputByMatch({ "speaker", "headphones", "airpods", "bluetooth", "buds", "earbud", "headset", "realtek", "output" });
+    {
+        if (auto* currentType = engine.getDeviceManager().getCurrentDeviceTypeObject())
+            monitor = findPreferredMonitorOutput(currentType->getDeviceNames(false), getSelectedOutputDeviceName());
+    }
     if (monitor.isEmpty())
         return false;
 
     const auto selectedOutput = getSelectedOutputDeviceName();
-    if (selectedOutput.isNotEmpty() && monitor.equalsIgnoreCase(selectedOutput))
+    if ((selectedOutput.isNotEmpty() && monitor.equalsIgnoreCase(selectedOutput)) || isPreferredVirtualMicOutputName(monitor))
     {
-        auto* currentType = engine.getDeviceManager().getCurrentDeviceTypeObject();
-        if (currentType != nullptr)
-        {
-            const auto outputNames = currentType->getDeviceNames(false);
-            for (const auto& candidate : outputNames)
-            {
-                if (! candidate.equalsIgnoreCase(selectedOutput))
-                {
-                    monitor = candidate;
-                    break;
-                }
-            }
-        }
+        if (auto* currentType = engine.getDeviceManager().getCurrentDeviceTypeObject())
+            monitor = findPreferredMonitorOutput(currentType->getDeviceNames(false), selectedOutput);
     }
 
     if (selectedOutput.isNotEmpty() && monitor.equalsIgnoreCase(selectedOutput))
@@ -3556,11 +3575,6 @@ PresetData MainComponent::buildCurrentPresetData(const juce::String& name, bool 
 juce::String MainComponent::buildCurrentPresetSnapshot()
 {
     auto obj = new juce::DynamicObject();
-    auto settings = engine.currentSettings();
-    obj->setProperty("inputDevice", settings.inputDeviceName);
-    obj->setProperty("outputDevice", settings.outputDeviceName);
-    obj->setProperty("bufferSize", settings.bufferSize);
-    obj->setProperty("sampleRate", settings.preferredSampleRate);
     obj->setProperty("outputGainDb", params.outputGainDb.load());
 
     juce::Array<juce::var> pluginsArray;
@@ -3934,37 +3948,7 @@ void MainComponent::loadPresetByName(const juce::String& name)
 {
     if (auto preset = presetStore.loadPreset(name))
     {
-        auto engineSettings = engine.currentSettings();
-        if (preset->engine.inputDeviceName.isNotEmpty())
-            engineSettings.inputDeviceName = preset->engine.inputDeviceName;
-        if (preset->engine.outputDeviceName.isNotEmpty())
-            engineSettings.outputDeviceName = preset->engine.outputDeviceName;
-        if (preset->engine.bufferSize > 0)
-            engineSettings.bufferSize = preset->engine.bufferSize;
-        if (preset->engine.preferredSampleRate > 0.0)
-            engineSettings.preferredSampleRate = preset->engine.preferredSampleRate;
-
-        inputBox.setText(engineSettings.inputDeviceName, juce::dontSendNotification);
-        {
-            const auto outputIndex = outputDeviceRealNames.indexOf(engineSettings.outputDeviceName);
-            if (outputIndex >= 0)
-                outputBox.setSelectedId(outputIndex + 1, juce::dontSendNotification);
-            else
-                outputBox.setText(getDisplayOutputName(engineSettings.outputDeviceName), juce::dontSendNotification);
-        }
-        syncBufferBoxSelection(bufferBox, engineSettings.bufferSize);
-
         closePluginEditorWindow();
-        juce::String startError;
-        if (! engine.start(engineSettings, startError))
-            Logger::instance().log("Preset audio apply failed: " + startError);
-
-        const auto appliedSettings = engine.currentSettings();
-        cachedSettings.inputDeviceName = appliedSettings.inputDeviceName;
-        cachedSettings.outputDeviceName = appliedSettings.outputDeviceName;
-        cachedSettings.bufferSize = appliedSettings.bufferSize;
-        cachedSettings.preferredSampleRate = appliedSettings.preferredSampleRate;
-        saveCachedSettings();
 
         if (const auto it = preset->values.find("outputGainDb"); it != preset->values.end())
         {
@@ -3993,11 +3977,9 @@ void MainComponent::loadPresetByName(const juce::String& name)
         }
         currentPresetName = preset->name;
         cachedSettings.lastPresetName = currentPresetName;
-        saveCachedSettings();
-        persistLastPresetName(currentPresetName);
+        persistSessionState();
         currentPresetLabel.setText("Current: " + currentPresetName, juce::dontSendNotification);
         presetBox.setText(currentPresetName, juce::dontSendNotification);
-        loadDeviceLists();
         refreshPluginChainUi();
         markCurrentPresetSnapshot();
     }
@@ -4005,8 +3987,7 @@ void MainComponent::loadPresetByName(const juce::String& name)
     {
         currentPresetName = "Default";
         cachedSettings.lastPresetName = currentPresetName;
-        saveCachedSettings();
-        persistLastPresetName(currentPresetName);
+        persistSessionState();
         currentPresetLabel.setText("Current: Default", juce::dontSendNotification);
         presetBox.setText("Default", juce::dontSendNotification);
         markCurrentPresetSnapshot();
