@@ -16,7 +16,17 @@ public:
 
     void setRefreshActive(bool active)
     {
-        const auto desiredHz = active ? 20 : 2;
+        if (! active)
+        {
+            if (refreshHz == 0)
+                return;
+
+            refreshHz = 0;
+            stopTimer();
+            return;
+        }
+
+        const auto desiredHz = 20;
         if (desiredHz == refreshHz)
             return;
 

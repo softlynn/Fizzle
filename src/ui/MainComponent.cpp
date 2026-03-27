@@ -32,7 +32,7 @@ float kUiControlScale = 1.0f;
 float kUiBackgroundAlphaScale = 0.84f;
 const juce::String kGithubRepoUrl("https://github.com/softlynn/Fizzle");
 const juce::String kWebsiteUrl("https://softlynn.github.io/Fizzle/");
-constexpr std::array<int, 8> kBufferSizeOptions { 64, 96, 128, 192, 256, 384, 512, 1024 };
+constexpr std::array<int, 14> kBufferSizeOptions { 32, 48, 64, 96, 128, 160, 192, 256, 320, 384, 512, 768, 1024, 2048 };
 
 struct PluginRuntimeFormat
 {
@@ -107,7 +107,7 @@ void populateBufferBox(juce::ComboBox& comboBox, int selectedBuffer)
 {
     comboBox.clear();
 
-    auto target = selectedBuffer > 0 ? selectedBuffer : kDefaultBlockSize;
+    const auto target = sanitizeAudioBufferSize(selectedBuffer, kDefaultBlockSize);
     int selectedId = 0;
     int id = 1;
     for (const auto option : kBufferSizeOptions)
@@ -125,11 +125,12 @@ void populateBufferBox(juce::ComboBox& comboBox, int selectedBuffer)
     }
 
     comboBox.setSelectedId(selectedId, juce::dontSendNotification);
+    comboBox.setText(juce::String(target), juce::dontSendNotification);
 }
 
 void syncBufferBoxSelection(juce::ComboBox& comboBox, int selectedBuffer)
 {
-    const auto target = juce::String(selectedBuffer > 0 ? selectedBuffer : kDefaultBlockSize);
+    const auto target = juce::String(sanitizeAudioBufferSize(selectedBuffer, kDefaultBlockSize));
     int existingId = 0;
     for (int i = 0; i < comboBox.getNumItems(); ++i)
     {
@@ -149,6 +150,51 @@ void syncBufferBoxSelection(juce::ComboBox& comboBox, int selectedBuffer)
         comboBox.addItem(target, newId);
         comboBox.setSelectedId(newId, juce::dontSendNotification);
     }
+
+    comboBox.setText(target, juce::dontSendNotification);
+}
+
+void populateListenBufferBox(juce::ComboBox& comboBox, int mainBuffer, int listenBuffer)
+{
+    comboBox.clear();
+    const auto safeMainBuffer = sanitizeAudioBufferSize(mainBuffer, kDefaultBlockSize);
+    const auto safeListenBuffer = sanitizeOptionalAudioBufferSize(listenBuffer);
+    comboBox.addItem("Match main buffer (" + juce::String(safeMainBuffer) + ")", 1);
+
+    int selectedId = safeListenBuffer == 0 ? 1 : 0;
+    int id = 2;
+    for (const auto option : kBufferSizeOptions)
+    {
+        comboBox.addItem(juce::String(option), id);
+        if (option == safeListenBuffer)
+            selectedId = id;
+        ++id;
+    }
+
+    if (safeListenBuffer > 0 && selectedId == 0)
+    {
+        comboBox.addItem(juce::String(safeListenBuffer), id);
+        selectedId = id;
+    }
+
+    comboBox.setSelectedId(selectedId, juce::dontSendNotification);
+    comboBox.setText(safeListenBuffer > 0 ? juce::String(safeListenBuffer)
+                                          : "Match main buffer (" + juce::String(safeMainBuffer) + ")",
+                     juce::dontSendNotification);
+}
+
+int parseMainBufferSize(const juce::ComboBox& comboBox)
+{
+    return sanitizeAudioBufferSize(comboBox.getText().trim().getIntValue(), kDefaultBlockSize);
+}
+
+int parseListenBufferSize(const juce::ComboBox& comboBox)
+{
+    const auto text = comboBox.getText().trim().toLowerCase();
+    if (text.isEmpty() || text.startsWith("match") || text == "same" || text == "auto")
+        return 0;
+
+    return sanitizeOptionalAudioBufferSize(text.getIntValue());
 }
 
 juce::Image createDitherNoiseTile()
@@ -207,6 +253,7 @@ juce::var presetDataToJsonVar(const PresetData& preset)
     root->setProperty("inputDevice", preset.engine.inputDeviceName);
     root->setProperty("outputDevice", preset.engine.outputDeviceName);
     root->setProperty("bufferSize", preset.engine.bufferSize);
+    root->setProperty("listenBufferSize", preset.engine.listenBufferSize);
     root->setProperty("sampleRate", preset.engine.preferredSampleRate);
 
     auto valuesObj = new juce::DynamicObject();
@@ -239,7 +286,12 @@ bool presetDataFromJsonVar(const juce::var& parsed, PresetData& out)
     out.name = obj->getProperty("name").toString();
     out.engine.inputDeviceName = obj->getProperty("inputDevice").toString();
     out.engine.outputDeviceName = obj->getProperty("outputDevice").toString();
-    out.engine.bufferSize = obj->hasProperty("bufferSize") ? static_cast<int>(obj->getProperty("bufferSize")) : kDefaultBlockSize;
+    out.engine.bufferSize = sanitizeAudioBufferSize(obj->hasProperty("bufferSize")
+                                                        ? static_cast<int>(obj->getProperty("bufferSize"))
+                                                        : kDefaultBlockSize);
+    out.engine.listenBufferSize = sanitizeOptionalAudioBufferSize(obj->hasProperty("listenBufferSize")
+                                                                      ? static_cast<int>(obj->getProperty("listenBufferSize"))
+                                                                      : 0);
     out.engine.preferredSampleRate = obj->hasProperty("sampleRate") ? static_cast<double>(obj->getProperty("sampleRate")) : kInternalSampleRate;
 
     if (auto* values = obj->getProperty("values").getDynamicObject())
@@ -1170,7 +1222,12 @@ public:
 };
 
 MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef, PresetStore& presetsRef, EffectParameters& paramsRef)
-    : engine(engineRef), settingsStore(settingsRef), presetStore(presetsRef), params(paramsRef), diagnostics(engineRef)
+    : engine(engineRef),
+      settingsStore(settingsRef),
+      presetStore(presetsRef),
+      params(paramsRef),
+      diagnostics(engineRef),
+      runtimeWatchdog(engineRef)
 {
     static ModernLookAndFeel modern;
     setLookAndFeel(&modern);
@@ -1203,7 +1260,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     updatesLinksLabel.setText("Quick links", juce::dontSendNotification);
     updatesLinksLabel.setColour(juce::Label::textColourId, kUiTextMuted);
     startupLabel.setText("Behavior", juce::dontSendNotification);
-    startupHintLabel.setText("Listen routing, plugin search folders, and startup controls.", juce::dontSendNotification);
+    startupHintLabel.setText("Tune listen routing, separate listen buffering, low CPU mode, plugin search folders, and startup controls.", juce::dontSendNotification);
     startupHintLabel.setColour(juce::Label::textColourId, kUiTextMuted);
     startupHintLabel.setJustificationType(juce::Justification::topLeft);
     appearanceModeLabel.setText("Mode", juce::dontSendNotification);
@@ -1332,7 +1389,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     startWithWindowsToggle.setButtonText("Start with Windows");
     startMinimizedToggle.setButtonText("Start minimized to tray");
     followAutoEnableWindowToggle.setButtonText("Open/close window with Program Auto-Enable");
+    lowCpuModeToggle.setButtonText("Low CPU mode: one effect slot, hidden UI sleep, listen-first");
     behaviorListenDeviceLabel.setText("Listen Output Device", juce::dontSendNotification);
+    behaviorListenBufferLabel.setText("Listen Buffer Size", juce::dontSendNotification);
     behaviorVstFoldersLabel.setText("VST Search Folders", juce::dontSendNotification);
     lightModeToggle.setButtonText("Light mode");
 
@@ -1345,6 +1404,12 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     appearanceSizeBox.addItem("Large", 3);
     behaviorListenDeviceBox.setTextWhenNothingSelected("Select device...");
     behaviorListenDeviceBox.addListener(this);
+    behaviorListenDeviceBox.setEditableText(false);
+    behaviorListenBufferBox.setTextWhenNothingSelected("Match main buffer");
+    behaviorListenBufferBox.addListener(this);
+    behaviorListenBufferBox.setEditableText(true);
+    bufferBox.setEditableText(true);
+    bufferBox.setTextWhenNothingSelected(juce::String(kDefaultBlockSize));
     appSearchEditor.setTextToShowWhenEmpty("Type to search programs...", juce::Colour(0xff9aa7b6));
     appSearchEditor.onTextChange = [this]
     {
@@ -1379,6 +1444,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     startWithWindowsToggle.addListener(this);
     startMinimizedToggle.addListener(this);
     followAutoEnableWindowToggle.addListener(this);
+    lowCpuModeToggle.addListener(this);
     appearanceThemeBox.addListener(this);
     appearanceBackgroundBox.addListener(this);
     appearanceSizeBox.addListener(this);
@@ -1530,6 +1596,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(startupLabel);
     settingsPanel->addAndMakeVisible(behaviorListenDeviceLabel);
     settingsPanel->addAndMakeVisible(behaviorListenDeviceBox);
+    settingsPanel->addAndMakeVisible(behaviorListenBufferLabel);
+    settingsPanel->addAndMakeVisible(behaviorListenBufferBox);
     settingsPanel->addAndMakeVisible(behaviorVstFoldersLabel);
     settingsPanel->addAndMakeVisible(behaviorVstFoldersListBox);
     settingsPanel->addAndMakeVisible(behaviorAddVstFolderButton);
@@ -1537,6 +1605,7 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     settingsPanel->addAndMakeVisible(startWithWindowsToggle);
     settingsPanel->addAndMakeVisible(startMinimizedToggle);
     settingsPanel->addAndMakeVisible(followAutoEnableWindowToggle);
+    settingsPanel->addAndMakeVisible(lowCpuModeToggle);
     settingsPanel->addAndMakeVisible(startupHintLabel);
     settingsPanel->addAndMakeVisible(closeSettingsButton);
 
@@ -1581,6 +1650,9 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     effectsToggle.setButtonText(fxEnabled ? "Effects On" : "Effects Off");
     outputGain.setValue(params.outputGainDb.load(), juce::dontSendNotification);
 
+    runtimeWatchdog.start();
+    runtimeWatchdog.setStateSnapshot("startup=initializing");
+
     cachedSettings = settingsStore.loadEngineSettings();
     safeStartupMode = beginCrashSafeSession();
     cachedSettings.themeVariant = juce::jlimit(0, 1, cachedSettings.themeVariant);
@@ -1605,6 +1677,8 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
     startWithWindowsToggle.setToggleState(cachedSettings.startWithWindows, juce::dontSendNotification);
     startMinimizedToggle.setToggleState(cachedSettings.startMinimizedToTray, juce::dontSendNotification);
     followAutoEnableWindowToggle.setToggleState(cachedSettings.followAutoEnableWindowState, juce::dontSendNotification);
+    lowCpuModeToggle.setToggleState(cachedSettings.lowCpuUsageMode, juce::dontSendNotification);
+    engine.setLowCpuModeEnabled(cachedSettings.lowCpuUsageMode);
     applyThemePalette();
     applyUiDensity();
     refreshAppearanceControls();
@@ -1618,9 +1692,11 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 
     loadDeviceLists();
     refreshListenOutputDevices();
+    populateListenBufferBox(behaviorListenBufferBox, cachedSettings.bufferSize, cachedSettings.listenBufferSize);
     refreshVstSearchPathList();
     refreshKnownPlugins();
     refreshPresets();
+    publishRuntimeWatchdogState();
     if (safeStartupMode)
     {
         if (cachedSettings.lastPresetName.isNotEmpty() && cachedSettings.lastPresetName != "Default")
@@ -1676,12 +1752,19 @@ MainComponent::MainComponent(AudioEngine& engineRef, SettingsStore& settingsRef,
 
     uiTimerHz = 30;
     startTimerHz(uiTimerHz);
+    refreshPluginChainUi();
+    updateWindowActivityState();
+    publishRuntimeWatchdogState();
 }
 
 MainComponent::~MainComponent()
 {
     stopTimer();
     persistSessionState();
+    runtimeWatchdog.stop();
+
+    if (blockingTaskThread.joinable())
+        blockingTaskThread.join();
 
     if (runningAppsThread.joinable())
     {
@@ -1709,15 +1792,85 @@ MainComponent::~MainComponent()
         }
     }
 
+    clearAutosaveDraft();
     endCrashSafeSession();
     setLookAndFeel(nullptr);
 }
 
+bool MainComponent::hasBlockingTaskInFlight() const
+{
+    return blockingTaskInFlight.load();
+}
+
+void MainComponent::setBusyOverlay(bool busy, const juce::String& text)
+{
+    restartOverlayActive = busy || restartOverlayAlpha > 0.01f;
+    restartOverlayBusy = busy;
+    restartOverlayText = text;
+
+    if (busy)
+    {
+        restartOverlayAlpha = juce::jmax(restartOverlayAlpha, 0.25f);
+        restartOverlayTargetAlpha = 1.0f;
+        restartOverlayTicks = 0;
+    }
+    else
+    {
+        restartOverlayTicks = 18;
+    }
+
+    publishRuntimeWatchdogState();
+    repaint();
+}
+
+bool MainComponent::launchBlockingTask(const juce::String& busyHint,
+                                       const juce::String& overlayText,
+                                       std::function<void(juce::String&)> task,
+                                       std::function<void(const juce::String&)> completion)
+{
+    if (blockingTaskInFlight.exchange(true))
+    {
+        if (busyHint.isNotEmpty())
+            setEffectsHint(busyHint, 90);
+        return false;
+    }
+
+    if (blockingTaskThread.joinable())
+        blockingTaskThread.join();
+
+    setBusyOverlay(true, overlayText);
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    blockingTaskThread = std::thread([this, safeThis, task = std::move(task), completion = std::move(completion)]() mutable
+    {
+        juce::String error;
+        try
+        {
+            task(error);
+        }
+        catch (...)
+        {
+            if (error.isEmpty())
+                error = "Unexpected background task failure.";
+            Logger::instance().log("Background task failed: " + error);
+        }
+
+        blockingTaskInFlight.store(false);
+        juce::MessageManager::callAsync([safeThis, error, completion = std::move(completion)]() mutable
+        {
+            if (safeThis == nullptr)
+                return;
+
+            safeThis->setBusyOverlay(false, {});
+            completion(error);
+        });
+    });
+
+    return true;
+}
+
 void MainComponent::onWindowVisible()
 {
-    meterIn.setRefreshActive(true);
-    meterOut.setRefreshActive(true);
-    diagnostics.setRefreshActive(true);
+    updateWindowActivityState();
     applyThemePalette();
     recoverFromModalBlockers(true);
 
@@ -1748,9 +1901,7 @@ void MainComponent::onWindowVisible()
 void MainComponent::onWindowHidden()
 {
     persistSessionState();
-    meterIn.setRefreshActive(false);
-    meterOut.setRefreshActive(false);
-    diagnostics.setRefreshActive(false);
+    updateWindowActivityState();
 }
 
 bool MainComponent::areEffectsEnabled() const
@@ -1761,6 +1912,67 @@ bool MainComponent::areEffectsEnabled() const
 bool MainComponent::isMuted() const
 {
     return params.mute.load();
+}
+
+juce::String MainComponent::buildRuntimeWatchdogState() const
+{
+    juce::StringArray parts;
+    parts.add("preset=" + (currentPresetName.isNotEmpty() ? currentPresetName : "Default"));
+    parts.add("visible=" + juce::String(isShowing() ? 1 : 0));
+    parts.add("lowCpu=" + juce::String(cachedSettings.lowCpuUsageMode ? 1 : 0));
+    parts.add("settingsOpen=" + juce::String(settingsPanelTargetVisible ? 1 : 0));
+    parts.add("effectsOn=" + juce::String(params.bypass.load() ? 0 : 1));
+    parts.add("listen=" + juce::String(engine.isListenEnabled() ? 1 : 0));
+    parts.add("muted=" + juce::String(params.mute.load() ? 1 : 0));
+    parts.add("plugins=" + juce::String(engine.getVstHost().getPluginCount()));
+    parts.add("vstMutations=" + juce::String(static_cast<int64>(engine.getVstHost().getMutationCounter())));
+    parts.add("scanInFlight=" + juce::String(vstScanInFlight.load() ? 1 : 0));
+    parts.add("appsRefresh=" + juce::String(runningAppsRefreshInFlight.load() ? 1 : 0));
+    parts.add("blockingTask=" + juce::String(blockingTaskInFlight.load() ? 1 : 0));
+    parts.add("audioApply=" + juce::String(applyingAudioSettings ? 1 : 0));
+    parts.add("overlayBusy=" + juce::String(restartOverlayBusy ? 1 : 0));
+    return parts.joinIntoString(" ");
+}
+
+void MainComponent::publishRuntimeWatchdogState()
+{
+    runtimeWatchdog.setStateSnapshot(buildRuntimeWatchdogState());
+}
+
+void MainComponent::updateWindowActivityState()
+{
+    const bool visible = isShowing();
+    engine.setUiVisible(visible);
+    meterIn.setRefreshActive(visible);
+    meterOut.setRefreshActive(visible);
+    diagnostics.setRefreshActive(visible);
+    runtimeWatchdog.setMonitoringSuspended(! visible && cachedSettings.lowCpuUsageMode && ! cachedSettings.autoEnableByApp);
+    publishRuntimeWatchdogState();
+
+    if (visible)
+    {
+        uiTimerHz = juce::jmax(uiTimerHz, 30);
+        startTimerHz(uiTimerHz);
+        return;
+    }
+
+    if (cachedSettings.lowCpuUsageMode)
+    {
+        if (cachedSettings.autoEnableByApp)
+        {
+            uiTimerHz = 1;
+            startTimerHz(uiTimerHz);
+        }
+        else
+        {
+            uiTimerHz = 0;
+            stopTimer();
+        }
+        return;
+    }
+
+    uiTimerHz = 2;
+    startTimerHz(uiTimerHz);
 }
 
 bool MainComponent::isLightModeEnabled() const
@@ -1804,8 +2016,6 @@ void MainComponent::trayLoadPreset(const juce::String& name)
         return;
 
     loadPresetByName(name);
-    refreshPresets();
-    presetBox.setText(currentPresetName, juce::dontSendNotification);
 }
 
 juce::Array<juce::File> MainComponent::getDefaultVst3Folders() const
@@ -2250,6 +2460,7 @@ void MainComponent::persistSessionState()
         cachedSettings.outputDeviceName = current.outputDeviceName;
     if (current.bufferSize > 0)
         cachedSettings.bufferSize = current.bufferSize;
+    cachedSettings.listenBufferSize = current.listenBufferSize;
     if (current.preferredSampleRate > 0.0)
         cachedSettings.preferredSampleRate = current.preferredSampleRate;
 
@@ -2339,6 +2550,9 @@ void MainComponent::updateSettingsTabVisibility()
     for (auto* c : { static_cast<juce::Component*>(&startupLabel),
                      static_cast<juce::Component*>(&behaviorListenDeviceLabel),
                      static_cast<juce::Component*>(&behaviorListenDeviceBox),
+                     static_cast<juce::Component*>(&behaviorListenBufferLabel),
+                     static_cast<juce::Component*>(&behaviorListenBufferBox),
+                     static_cast<juce::Component*>(&lowCpuModeToggle),
                      static_cast<juce::Component*>(&behaviorVstFoldersLabel),
                      static_cast<juce::Component*>(&behaviorVstFoldersListBox),
                      static_cast<juce::Component*>(&behaviorAddVstFolderButton),
@@ -2659,8 +2873,12 @@ void MainComponent::refreshKnownPlugins()
 
 void MainComponent::refreshPluginChainUi()
 {
+    removeVstButton.setButtonText(cachedSettings.lowCpuUsageMode ? "Clear Effect Slot" : "Remove VST");
+    dragHintLabel.setText(cachedSettings.lowCpuUsageMode ? "Low CPU mode: single effect slot" : "Drag VST rows to reorder",
+                          juce::dontSendNotification);
     vstChainList.updateContent();
     vstChainList.repaint();
+    publishRuntimeWatchdogState();
 }
 
 void MainComponent::loadDeviceLists()
@@ -2693,7 +2911,9 @@ void MainComponent::loadDeviceLists()
     cachedSettings.inputDeviceName = current.inputDeviceName;
     cachedSettings.outputDeviceName = current.outputDeviceName;
     cachedSettings.bufferSize = current.bufferSize;
+    cachedSettings.listenBufferSize = current.listenBufferSize;
     syncBufferBoxSelection(bufferBox, current.bufferSize);
+    populateListenBufferBox(behaviorListenBufferBox, current.bufferSize, current.listenBufferSize);
     if (current.inputDeviceName.isNotEmpty())
         inputBox.setSelectedId(inputNames.indexOf(current.inputDeviceName) + 1, juce::dontSendNotification);
     if (current.outputDeviceName.isNotEmpty())
@@ -2733,43 +2953,61 @@ void MainComponent::refreshPresets()
 
 void MainComponent::applySettingsFromControls()
 {
-    if (applyingAudioSettings)
+    if (applyingAudioSettings || hasBlockingTaskInFlight())
         return;
 
-    const juce::ScopedValueSetter<bool> applyingGuard(applyingAudioSettings, true);
     auto s = engine.currentSettings();
     const auto previous = s;
     s.inputDeviceName = inputBox.getText();
     s.outputDeviceName = getSelectedOutputDeviceName();
-    const auto requestedBuffer = bufferBox.getText().getIntValue();
-    s.bufferSize = requestedBuffer > 0 ? requestedBuffer : kDefaultBlockSize;
+    s.bufferSize = parseMainBufferSize(bufferBox);
+    s.listenBufferSize = parseListenBufferSize(behaviorListenBufferBox);
 
     if (s.inputDeviceName.isEmpty() || s.outputDeviceName.isEmpty())
         return;
 
     if (s.inputDeviceName == previous.inputDeviceName
         && s.outputDeviceName == previous.outputDeviceName
-        && s.bufferSize == previous.bufferSize)
+        && s.bufferSize == previous.bufferSize
+        && s.listenBufferSize == previous.listenBufferSize)
         return;
 
     saveAutosaveDraftIfNeeded(true);
-    juce::String error;
     closePluginEditorWindow();
-    if (! engine.start(s, error))
-    {
-        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Audio Error", error);
-        juce::String rollbackError;
-        if (! engine.start(previous, rollbackError))
-            Logger::instance().log("Audio rollback failed: " + rollbackError);
-    }
+    applyingAudioSettings = true;
+    if (! launchBlockingTask("An audio or VST task is already running.",
+                             "Applying audio settings",
+                             [this, requested = s, previous](juce::String& error)
+                             {
+                                 if (! engine.start(requested, error))
+                                 {
+                                     juce::String rollbackError;
+                                     if (! engine.start(previous, rollbackError))
+                                         Logger::instance().log("Audio rollback failed: " + rollbackError);
+                                 }
+                             },
+                             [this](const juce::String& error)
+                             {
+                                 applyingAudioSettings = false;
+                                 loadDeviceLists();
 
-    const auto applied = engine.currentSettings();
-    cachedSettings.inputDeviceName = applied.inputDeviceName;
-    cachedSettings.outputDeviceName = applied.outputDeviceName;
-    cachedSettings.bufferSize = applied.bufferSize;
-    cachedSettings.preferredSampleRate = applied.preferredSampleRate;
-    persistSessionState();
-    loadDeviceLists();
+                                 const auto applied = engine.currentSettings();
+                                 cachedSettings.inputDeviceName = applied.inputDeviceName;
+                                 cachedSettings.outputDeviceName = applied.outputDeviceName;
+                                 cachedSettings.bufferSize = applied.bufferSize;
+                                 cachedSettings.listenBufferSize = applied.listenBufferSize;
+                                 cachedSettings.preferredSampleRate = applied.preferredSampleRate;
+                                 persistSessionState();
+                                 publishRuntimeWatchdogState();
+
+                                 if (error.isNotEmpty())
+                                     juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Audio Error", error);
+                                 else
+                                     setEffectsHint("Applied audio settings", 45);
+                             }))
+    {
+        applyingAudioSettings = false;
+    }
 }
 
 juce::String MainComponent::findOutputByMatch(const juce::StringArray& candidates) const
@@ -2897,6 +3135,40 @@ void MainComponent::closePluginEditorWindow()
     pluginEditorWindow.reset();
 }
 
+void MainComponent::savePresetAsync(const juce::String& name, std::function<void()> afterSave)
+{
+    const auto trimmedName = name.trim().isNotEmpty()
+        ? name.trim()
+        : "Preset-" + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
+    auto savedPreset = std::make_shared<PresetData>();
+
+    if (! launchBlockingTask("Another task is already running.",
+                             "Saving preset",
+                             [this, trimmedName, savedPreset](juce::String&)
+                             {
+                                 *savedPreset = buildCurrentPresetData(trimmedName);
+                                 presetStore.savePreset(*savedPreset);
+                             },
+                             [this, savedPreset, afterSave = std::move(afterSave)](const juce::String&)
+                             {
+                                 currentPresetName = savedPreset->name;
+                                 cachedSettings.lastPresetName = currentPresetName;
+                                 saveCachedSettings();
+                                 persistLastPresetName(currentPresetName);
+                                 currentPresetLabel.setText("Current: " + currentPresetName, juce::dontSendNotification);
+                                 refreshPresets();
+                                 markCurrentPresetSnapshot();
+                                 clearAutosaveDraft();
+                                 publishRuntimeWatchdogState();
+                                 setEffectsHint("Preset saved", 50);
+                                 if (afterSave)
+                                     afterSave();
+                             }))
+    {
+        return;
+    }
+}
+
 bool MainComponent::computeAutoEnableShouldEnable(bool& hasCondition) const
 {
     hasCondition = false;
@@ -2935,6 +3207,70 @@ bool MainComponent::computeAutoEnableShouldEnable(bool& hasCondition) const
     return shouldEnable;
 }
 
+void MainComponent::pollAutoEnableState()
+{
+    bool hasCondition = false;
+    const auto shouldEnable = computeAutoEnableShouldEnable(hasCondition);
+    if (manualEffectsPinnedOn)
+    {
+        params.bypass.store(false);
+        effectsToggle.setToggleState(true, juce::dontSendNotification);
+        effectsToggle.setButtonText("Effects On");
+        setEffectsHint({}, 0);
+    }
+    else
+    {
+        if (! hasCondition)
+        {
+            manualEffectsOverrideAutoEnable = false;
+        }
+        else if (shouldEnable)
+        {
+            if (manualEffectsOverrideAutoEnable && ! effectsToggle.getToggleState())
+            {
+                setEffectsHint("Overriding auto-enable", 45);
+            }
+            else
+            {
+                manualEffectsOverrideAutoEnable = false;
+                params.bypass.store(false);
+                effectsToggle.setToggleState(true, juce::dontSendNotification);
+                effectsToggle.setButtonText("Effects On");
+                setEffectsHint({}, 0);
+            }
+
+            if (cachedSettings.autoListenOnAutoEnable && ! engine.isListenEnabled())
+                enableListenFromSettings(false);
+        }
+        else
+        {
+            manualEffectsOverrideAutoEnable = false;
+        }
+    }
+
+    if (cachedSettings.followAutoEnableWindowState && hasCondition)
+    {
+        if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+        {
+            if (shouldEnable && ! wasFollowAutoEnableMatched)
+            {
+                window->setVisible(true);
+                window->setMinimised(false);
+                window->toFront(true);
+            }
+            else if (! shouldEnable && wasFollowAutoEnableMatched)
+            {
+                window->setVisible(false);
+            }
+        }
+        wasFollowAutoEnableMatched = shouldEnable;
+    }
+    else
+    {
+        wasFollowAutoEnableMatched = false;
+    }
+}
+
 bool MainComponent::enableListenFromSettings(bool showConflictDialog)
 {
     auto monitor = cachedSettings.listenMonitorDeviceName.trim();
@@ -2969,13 +3305,26 @@ bool MainComponent::enableListenFromSettings(bool showConflictDialog)
     cachedSettings.listenMonitorDeviceName = monitor;
     saveCachedSettings();
     refreshListenOutputDevices();
-    engine.setMonitorOutputDevice(monitor);
-    engine.setListenEnabled(true);
+    if (! launchBlockingTask({},
+                             "Starting listen output",
+                             [this, monitor](juce::String&)
+                             {
+                                 engine.setMonitorOutputDevice(monitor);
+                                 engine.setListenEnabled(true);
+                             },
+                             [this](const juce::String&)
+                             {
+                                 const auto enabled = engine.isListenEnabled();
+                                 routeSpeakersButton.setButtonText(enabled ? "Listening" : "Listen");
+                                 routeSpeakersButton.setToggleState(enabled, juce::dontSendNotification);
+                                 if (enabled)
+                                     setEffectsHint("Listen enabled", 45);
+                             }))
+    {
+        return false;
+    }
 
-    const auto enabled = engine.isListenEnabled();
-    routeSpeakersButton.setButtonText(enabled ? "Listening" : "Listen");
-    routeSpeakersButton.setToggleState(enabled, juce::dontSendNotification);
-    return enabled;
+    return true;
 }
 
 void MainComponent::setEffectsHint(const juce::String& text, int ticks)
@@ -2985,6 +3334,61 @@ void MainComponent::setEffectsHint(const juce::String& text, int ticks)
     effectsHintTargetAlpha = text.isNotEmpty() ? 1.0f : 0.0f;
     if (text.isNotEmpty() && effectsHintAlpha < 0.05f)
         effectsHintAlpha = 0.05f;
+}
+
+bool MainComponent::enforceLowCpuPluginLimit(bool showHint)
+{
+    if (! cachedSettings.lowCpuUsageMode)
+        return false;
+
+    bool trimmed = false;
+    for (int row = getNumRows() - 1; row >= 1; --row)
+    {
+        removePluginAtIndex(row, false);
+        trimmed = true;
+    }
+
+    if (trimmed)
+    {
+        refreshPluginChainUi();
+        if (getNumRows() > 0)
+            vstChainList.selectRow(0);
+        if (showHint)
+            setEffectsHint("Low CPU mode kept only the first effect slot", 140);
+    }
+
+    return trimmed;
+}
+
+void MainComponent::applyLowCpuModeSetting(bool enabled, bool persistSetting, bool showHint)
+{
+    cachedSettings.lowCpuUsageMode = enabled;
+    lowCpuModeToggle.setToggleState(enabled, juce::dontSendNotification);
+    engine.setLowCpuModeEnabled(enabled);
+
+    const bool trimmed = enabled ? enforceLowCpuPluginLimit(false) : false;
+    refreshPluginChainUi();
+    updateWindowActivityState();
+
+    if (persistSetting)
+        saveCachedSettings();
+
+    if (! showHint)
+        return;
+
+    if (enabled)
+    {
+        if (trimmed)
+            setEffectsHint("Low CPU mode kept only the first effect slot", 140);
+        else
+            setEffectsHint("Low CPU mode enabled", 90);
+    }
+    else
+    {
+        setEffectsHint("Low CPU mode disabled", 60);
+    }
+
+    publishRuntimeWatchdogState();
 }
 
 void MainComponent::applyEffectsEnabledState(bool enabled, bool fromUserToggle)
@@ -3028,40 +3432,29 @@ void MainComponent::applyEffectsEnabledState(bool enabled, bool fromUserToggle)
 
 void MainComponent::runAudioRestartWithOverlay(bool fromTray)
 {
-    if (restartOverlayBusy)
+    if (hasBlockingTaskInFlight())
         return;
 
-    restartOverlayActive = true;
-    restartOverlayBusy = true;
-    restartOverlayAlpha = juce::jmax(restartOverlayAlpha, 0.25f);
-    restartOverlayTargetAlpha = 1.0f;
-    restartOverlayTicks = 0;
-    restartOverlayText.clear();
-    repaint();
+    saveAutosaveDraftIfNeeded(true);
+    closePluginEditorWindow();
+    launchBlockingTask("An audio or VST task is already running.",
+                       "Restarting audio",
+                       [this](juce::String& error)
+                       {
+                           engine.restartAudio(error);
+                       },
+                       [this, fromTray](const juce::String& error)
+                       {
+                           loadDeviceLists();
+                           if (error.isNotEmpty())
+                           {
+                               Logger::instance().log("Restart error: " + error);
+                               setEffectsHint("Audio restart failed", 90);
+                               return;
+                           }
 
-    juce::Component::SafePointer<MainComponent> safeThis(this);
-    juce::Timer::callAfterDelay(20, [safeThis, fromTray]
-    {
-        if (safeThis == nullptr)
-            return;
-
-        safeThis->saveAutosaveDraftIfNeeded(true);
-        safeThis->closePluginEditorWindow();
-        juce::String error;
-        safeThis->engine.restartAudio(error);
-        safeThis->loadDeviceLists();
-        safeThis->restartOverlayBusy = false;
-        safeThis->restartOverlayTicks = 18;
-
-        if (error.isNotEmpty())
-        {
-            Logger::instance().log("Restart error: " + error);
-            safeThis->setEffectsHint("Audio restart failed", 90);
-            return;
-        }
-
-        safeThis->setEffectsHint(fromTray ? "Restarted audio from tray" : "Restarted audio", 55);
-    });
+                           setEffectsHint(fromTray ? "Restarted audio from tray" : "Restarted audio", 55);
+                       });
 }
 
 void MainComponent::applyThemePalette()
@@ -3162,6 +3555,7 @@ void MainComponent::applyThemePalette()
                      static_cast<juce::Label*>(&appearanceBackgroundLabel),
                      static_cast<juce::Label*>(&appearanceSizeLabel),
                      static_cast<juce::Label*>(&behaviorListenDeviceLabel),
+                     static_cast<juce::Label*>(&behaviorListenBufferLabel),
                      static_cast<juce::Label*>(&behaviorVstFoldersLabel),
                      static_cast<juce::Label*>(&dragHintLabel),
                      static_cast<juce::Label*>(&title),
@@ -3200,7 +3594,8 @@ void MainComponent::applyThemePalette()
                       static_cast<juce::ComboBox*>(&appearanceThemeBox),
                       static_cast<juce::ComboBox*>(&appearanceBackgroundBox),
                       static_cast<juce::ComboBox*>(&appearanceSizeBox),
-                      static_cast<juce::ComboBox*>(&behaviorListenDeviceBox) })
+                      static_cast<juce::ComboBox*>(&behaviorListenDeviceBox),
+                      static_cast<juce::ComboBox*>(&behaviorListenBufferBox) })
     {
         if (cb == nullptr)
             continue;
@@ -3252,6 +3647,7 @@ void MainComponent::applyThemePalette()
                      static_cast<juce::ToggleButton*>(&startWithWindowsToggle),
                      static_cast<juce::ToggleButton*>(&startMinimizedToggle),
                      static_cast<juce::ToggleButton*>(&followAutoEnableWindowToggle),
+                     static_cast<juce::ToggleButton*>(&lowCpuModeToggle),
                      static_cast<juce::ToggleButton*>(&lightModeToggle) })
     {
         if (t != nullptr)
@@ -3326,6 +3722,7 @@ void MainComponent::applyUiDensity()
     appearanceBackgroundLabel.setFont(sectionLabelFont);
     appearanceSizeLabel.setFont(sectionLabelFont);
     behaviorListenDeviceLabel.setFont(sectionLabelFont);
+    behaviorListenBufferLabel.setFont(sectionLabelFont);
     behaviorVstFoldersLabel.setFont(sectionLabelFont);
 
     juce::Font versionFont(juce::FontOptions(11.0f * uiScale));
@@ -3543,9 +3940,13 @@ PresetData MainComponent::buildCurrentPresetData(const juce::String& name, bool 
     PresetData preset;
     preset.name = name;
     preset.engine = engine.currentSettings();
+    preset.engine.lowCpuUsageMode = cachedSettings.lowCpuUsageMode;
     preset.values["outputGainDb"] = params.outputGainDb.load();
+    int savedPlugins = 0;
     for (auto plugin : engine.getVstHost().getChainHandles())
     {
+        if (cachedSettings.lowCpuUsageMode && savedPlugins >= 1)
+            break;
         if (plugin == nullptr || plugin->instance == nullptr)
             continue;
 
@@ -3568,6 +3969,7 @@ PresetData MainComponent::buildCurrentPresetData(const juce::String& name, bool 
             }
         }
         preset.plugins.add(state);
+        ++savedPlugins;
     }
     return preset;
 }
@@ -3578,8 +3980,11 @@ juce::String MainComponent::buildCurrentPresetSnapshot()
     obj->setProperty("outputGainDb", params.outputGainDb.load());
 
     juce::Array<juce::var> pluginsArray;
+    int savedPlugins = 0;
     for (auto plugin : engine.getVstHost().getChainHandles())
     {
+        if (cachedSettings.lowCpuUsageMode && savedPlugins >= 1)
+            break;
         if (plugin == nullptr || plugin->instance == nullptr)
             continue;
         auto pluginObj = new juce::DynamicObject();
@@ -3588,6 +3993,7 @@ juce::String MainComponent::buildCurrentPresetSnapshot()
         pluginObj->setProperty("mix", plugin->mix.load());
         pluginObj->setProperty("faulted", plugin->faulted.load());
         pluginsArray.add(pluginObj);
+        ++savedPlugins;
     }
     obj->setProperty("plugins", pluginsArray);
 
@@ -3596,12 +4002,14 @@ juce::String MainComponent::buildCurrentPresetSnapshot()
 
 bool MainComponent::hasUnsavedPresetChanges()
 {
-    return buildCurrentPresetSnapshot() != lastPresetSnapshot;
+    return buildCurrentPresetSnapshot() != lastPresetSnapshot
+        || engine.getVstHost().getMutationCounter() != lastPresetVstMutationCounter;
 }
 
 void MainComponent::markCurrentPresetSnapshot()
 {
     lastPresetSnapshot = buildCurrentPresetSnapshot();
+    lastPresetVstMutationCounter = engine.getVstHost().getMutationCounter();
 }
 
 juce::String MainComponent::loadPersistedLastPresetName() const
@@ -3651,6 +4059,7 @@ juce::File MainComponent::getAutosaveDraftFile() const
 void MainComponent::clearAutosaveDraft()
 {
     lastAutosaveDraftFingerprint.clear();
+    lastAutosaveDraftVstMutationCounter = engine.getVstHost().getMutationCounter();
     const auto file = getAutosaveDraftFile();
     if (file.existsAsFile())
         file.deleteFile();
@@ -3662,39 +4071,47 @@ void MainComponent::saveAutosaveDraftIfNeeded(bool force)
         return;
 
     const auto now = juce::Time::getMillisecondCounter();
-    if (! force && appStartMs != 0 && (now - appStartMs) < 15000u)
+    if (! force && appStartMs != 0 && (now - appStartMs) < 5000u)
         return;
-    if (! force && lastDraftAutosaveCheckMs != 0 && (now - lastDraftAutosaveCheckMs) < 8000u)
+    if (! force && lastDraftAutosaveCheckMs != 0 && (now - lastDraftAutosaveCheckMs) < 2500u)
         return;
     lastDraftAutosaveCheckMs = now;
 
-    if (restartOverlayBusy || applyingAudioSettings || audioApplyQueued || draggingResizeGrip || dragFromRow >= 0)
+    if (restartOverlayBusy || hasBlockingTaskInFlight() || applyingAudioSettings || audioApplyQueued || draggingResizeGrip || dragFromRow >= 0)
+        return;
+
+    const auto currentVstMutationCounter = engine.getVstHost().getMutationCounter();
+    if (currentVstMutationCounter == lastPresetVstMutationCounter)
+    {
+        clearAutosaveDraft();
+        return;
+    }
+
+    if (! force && currentVstMutationCounter == lastAutosaveDraftVstMutationCounter)
         return;
 
     const auto snapshot = buildCurrentPresetSnapshot();
     if (snapshot.isEmpty())
         return;
 
-    if (snapshot == lastPresetSnapshot)
-    {
-        clearAutosaveDraft();
-        return;
-    }
-
-    if (! force && snapshot == lastAutosaveDraftFingerprint)
-        return;
-
-    auto draft = buildCurrentPresetData(currentPresetName.isNotEmpty() ? currentPresetName : "Default", false);
+    auto watchdogActivity = runtimeWatchdog.scopedActivity("autosave-vst-recovery");
+    auto draft = buildCurrentPresetData(currentPresetName.isNotEmpty() ? currentPresetName : "Default", true);
     draft.name = currentPresetName.isNotEmpty() ? currentPresetName : "Default";
     auto rootVar = presetDataToJsonVar(draft);
     if (auto* root = rootVar.getDynamicObject())
     {
         root->setProperty("draftType", "recovery");
+        root->setProperty("draftScope", "vst");
         root->setProperty("draftSavedAtUtc", juce::Time::getCurrentTime().toISO8601(true));
+        root->setProperty("sourcePresetName", draft.name);
+        root->setProperty("vstMutationCounter", static_cast<int64>(currentVstMutationCounter));
     }
 
     if (getAutosaveDraftFile().replaceWithText(juce::JSON::toString(rootVar, true)))
+    {
         lastAutosaveDraftFingerprint = snapshot;
+        lastAutosaveDraftVstMutationCounter = currentVstMutationCounter;
+    }
 }
 
 bool MainComponent::loadAutosaveDraftToRecoveredPreset(juce::String& recoveredPresetName)
@@ -3723,8 +4140,6 @@ bool MainComponent::loadAutosaveDraftToRecoveredPreset(juce::String& recoveredPr
     presetStore.savePreset(draft);
 
     loadPresetByName(recoveredPresetName);
-    refreshPresets();
-    presetBox.setText(currentPresetName, juce::dontSendNotification);
     clearAutosaveDraft();
     setEffectsHint("Recovered autosave draft", 80);
     return true;
@@ -3736,6 +4151,9 @@ void MainComponent::promptRestoreAutosaveDraftIfAvailable()
         return;
 
     if (! cachedSettings.autoSaveDraftRecovery)
+        return;
+
+    if (! safeStartupMode)
         return;
 
     if (! isShowing())
@@ -3752,6 +4170,10 @@ void MainComponent::promptRestoreAutosaveDraftIfAvailable()
     const auto parsed = juce::JSON::parse(file);
     if (auto* obj = parsed.getDynamicObject())
     {
+        const auto scope = obj->getProperty("draftScope").toString().trim();
+        if (scope.isNotEmpty() && scope != "vst")
+            return;
+
         const auto n = obj->getProperty("name").toString().trim();
         if (n.isNotEmpty())
             draftName = "\"" + n + "\"";
@@ -3877,31 +4299,48 @@ void MainComponent::restoreLastRemovedPlugin()
     if (! lastRemovedPlugin.valid)
         return;
 
-    juce::String error;
-    const auto d = engine.getDiagnostics();
-    const auto pluginFormat = getPluginRuntimeFormat(d);
-    if (! engine.getVstHost().addPluginWithState(lastRemovedPlugin.description,
-                                                 pluginFormat.sampleRate,
-                                                 pluginFormat.blockSize,
-                                                 lastRemovedPlugin.base64State,
-                                                 error))
+    if (cachedSettings.lowCpuUsageMode && getNumRows() >= 1)
     {
-        if (error.isNotEmpty())
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Undo Remove Failed", error);
+        setEffectsHint("Low CPU mode allows one effect slot", 120);
         return;
     }
 
-    const auto newIndex = getNumRows() - 1;
-    engine.getVstHost().setEnabled(newIndex, lastRemovedPlugin.enabled);
-    engine.getVstHost().setMix(newIndex, lastRemovedPlugin.mix);
+    const auto d = engine.getDiagnostics();
+    const auto pluginFormat = getPluginRuntimeFormat(d);
+    const auto snapshot = lastRemovedPlugin;
+    launchBlockingTask("Another task is already running.",
+                       "Restoring VST",
+                       [this, snapshot, pluginFormat](juce::String& error)
+                       {
+                           if (! engine.getVstHost().addPluginWithState(snapshot.description,
+                                                                        pluginFormat.sampleRate,
+                                                                        pluginFormat.blockSize,
+                                                                        snapshot.base64State,
+                                                                        error))
+                           {
+                               return;
+                           }
 
-    const auto targetIndex = juce::jlimit(0, juce::jmax(0, getNumRows() - 1), lastRemovedPlugin.index);
-    if (targetIndex != newIndex)
-        engine.getVstHost().movePlugin(newIndex, targetIndex);
+                           const auto newIndex = engine.getVstHost().getPluginCount() - 1;
+                           engine.getVstHost().setEnabled(newIndex, snapshot.enabled);
+                           engine.getVstHost().setMix(newIndex, snapshot.mix);
 
-    refreshPluginChainUi();
-    vstChainList.selectRow(targetIndex);
-    setEffectsHint("Restored removed VST", 50);
+                           const auto targetIndex = juce::jlimit(0, juce::jmax(0, engine.getVstHost().getPluginCount() - 1), snapshot.index);
+                           if (targetIndex != newIndex)
+                               engine.getVstHost().movePlugin(newIndex, targetIndex);
+                       },
+                       [this, snapshot](const juce::String& error)
+                       {
+                           if (error.isNotEmpty())
+                           {
+                               juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Undo Remove Failed", error);
+                               return;
+                           }
+
+                           refreshPluginChainUi();
+                           vstChainList.selectRow(juce::jlimit(0, juce::jmax(0, getNumRows() - 1), snapshot.index));
+                           setEffectsHint("Restored removed VST", 50);
+                       });
 }
 
 void MainComponent::rowQuickActionMenu(int row, juce::Point<int> screenPosition)
@@ -3946,52 +4385,101 @@ void MainComponent::rowQuickActionMenu(int row, juce::Point<int> screenPosition)
 
 void MainComponent::loadPresetByName(const juce::String& name)
 {
-    if (auto preset = presetStore.loadPreset(name))
+    struct PresetLoadResult
     {
-        closePluginEditorWindow();
+        bool found { false };
+        bool hasOutputGain { false };
+        bool trimmedForLowCpu { false };
+        juce::String presetName { "Default" };
+        float outputGainDb { 0.0f };
+    };
 
-        if (const auto it = preset->values.find("outputGainDb"); it != preset->values.end())
-        {
-            params.outputGainDb.store(it->second);
-            outputGain.setValue(it->second, juce::dontSendNotification);
-        }
+    closePluginEditorWindow();
+    const auto lowCpuMode = cachedSettings.lowCpuUsageMode;
+    auto result = std::make_shared<PresetLoadResult>();
+    launchBlockingTask("Another task is already running.",
+                       "Loading preset",
+                       [this, name, lowCpuMode, result](juce::String& error)
+                       {
+                           auto preset = presetStore.loadPreset(name);
+                           if (! preset.has_value())
+                               return;
 
-        engine.getVstHost().clear();
-        juce::String error;
-        const auto pluginFormat = getPluginRuntimeFormat(engine.getDiagnostics());
-        for (const auto& p : preset->plugins)
-        {
-            juce::PluginDescription description;
-            if (engine.getVstHost().findDescriptionByIdentifier(p.identifier, description))
-            {
-                if (engine.getVstHost().addPluginWithState(description, pluginFormat.sampleRate, pluginFormat.blockSize, p.base64State, error))
-                {
-                    auto chain = engine.getVstHost().getChain();
-                    if (auto* last = chain.getLast())
-                    {
-                        last->enabled.store(p.enabled);
-                        last->mix.store(p.mix);
-                    }
-                }
-            }
-        }
-        currentPresetName = preset->name;
-        cachedSettings.lastPresetName = currentPresetName;
-        persistSessionState();
-        currentPresetLabel.setText("Current: " + currentPresetName, juce::dontSendNotification);
-        presetBox.setText(currentPresetName, juce::dontSendNotification);
-        refreshPluginChainUi();
-        markCurrentPresetSnapshot();
-    }
-    else
-    {
-        currentPresetName = "Default";
-        cachedSettings.lastPresetName = currentPresetName;
-        persistSessionState();
-        currentPresetLabel.setText("Current: Default", juce::dontSendNotification);
-        presetBox.setText("Default", juce::dontSendNotification);
-        markCurrentPresetSnapshot();
-    }
+                           result->found = true;
+                           result->presetName = preset->name;
+                           if (const auto it = preset->values.find("outputGainDb"); it != preset->values.end())
+                           {
+                               result->hasOutputGain = true;
+                               result->outputGainDb = it->second;
+                           }
+
+                           engine.getVstHost().clear();
+                           const auto pluginFormat = getPluginRuntimeFormat(engine.getDiagnostics());
+                           int loadedPlugins = 0;
+                           for (const auto& p : preset->plugins)
+                           {
+                               if (lowCpuMode && loadedPlugins >= 1)
+                               {
+                                   result->trimmedForLowCpu = true;
+                                   break;
+                               }
+
+                               juce::PluginDescription description;
+                               if (! engine.getVstHost().findDescriptionByIdentifier(p.identifier, description))
+                                   continue;
+
+                               juce::String addError;
+                               if (! engine.getVstHost().addPluginWithState(description,
+                                                                            pluginFormat.sampleRate,
+                                                                            pluginFormat.blockSize,
+                                                                            p.base64State,
+                                                                            addError))
+                               {
+                                   if (error.isEmpty() && addError.isNotEmpty())
+                                       error = addError;
+                                   continue;
+                               }
+
+                               auto chain = engine.getVstHost().getChain();
+                               if (auto* last = chain.getLast())
+                               {
+                                   last->enabled.store(p.enabled);
+                                   last->mix.store(p.mix);
+                                   ++loadedPlugins;
+                               }
+                           }
+
+                           if (lowCpuMode && preset->plugins.size() > 1)
+                               result->trimmedForLowCpu = true;
+                       },
+                       [this, result](const juce::String& error)
+                       {
+                           if (result->hasOutputGain)
+                           {
+                               params.outputGainDb.store(result->outputGainDb);
+                               outputGain.setValue(result->outputGainDb, juce::dontSendNotification);
+                           }
+
+                           currentPresetName = result->found ? result->presetName : "Default";
+                           cachedSettings.lastPresetName = currentPresetName;
+                           persistSessionState();
+                           currentPresetLabel.setText("Current: " + currentPresetName, juce::dontSendNotification);
+                           presetBox.setText(currentPresetName, juce::dontSendNotification);
+                           refreshPresets();
+                           refreshPluginChainUi();
+
+                           if (result->trimmedForLowCpu)
+                               setEffectsHint("Low CPU mode loaded only the first effect from this preset", 140);
+                           else if (error.isNotEmpty())
+                               setEffectsHint("Preset loaded with skipped plugin(s)", 120);
+
+                           markCurrentPresetSnapshot();
+                           clearAutosaveDraft();
+                           publishRuntimeWatchdogState();
+
+                           if (error.isNotEmpty())
+                               Logger::instance().log("Preset load warning: " + error);
+                       });
 }
 
 void MainComponent::buttonClicked(juce::Button* button)
@@ -4047,9 +4535,18 @@ void MainComponent::buttonClicked(juce::Button* button)
         }
         else
         {
-            engine.setListenEnabled(false);
-            routeSpeakersButton.setButtonText("Listen");
-            routeSpeakersButton.setToggleState(false, juce::dontSendNotification);
+            launchBlockingTask({},
+                               "Stopping listen output",
+                               [this](juce::String&)
+                               {
+                                   engine.setListenEnabled(false);
+                               },
+                               [this](const juce::String&)
+                               {
+                                   routeSpeakersButton.setButtonText("Listen");
+                                   routeSpeakersButton.setToggleState(false, juce::dontSendNotification);
+                                   setEffectsHint("Listen disabled", 35);
+                               });
         }
     }
     else if (button == &outputGainResetButton)
@@ -4082,19 +4579,7 @@ void MainComponent::buttonClicked(juce::Button* button)
                 return;
 
             auto name = prompt->getTextEditorContents("name").trim();
-            if (name.isEmpty())
-                name = "Preset-" + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
-
-            auto preset = buildCurrentPresetData(name);
-            presetStore.savePreset(preset);
-            currentPresetName = preset.name;
-            cachedSettings.lastPresetName = currentPresetName;
-            saveCachedSettings();
-            persistLastPresetName(currentPresetName);
-            currentPresetLabel.setText("Current: " + currentPresetName, juce::dontSendNotification);
-            refreshPresets();
-            markCurrentPresetSnapshot();
-            clearAutosaveDraft();
+            savePresetAsync(name);
         }), true);
     }
     else if (button == &deletePresetButton)
@@ -4123,6 +4608,8 @@ void MainComponent::buttonClicked(juce::Button* button)
                 refreshPresets();
                 presetBox.setText("Default", juce::dontSendNotification);
                 markCurrentPresetSnapshot();
+                clearAutosaveDraft();
+                publishRuntimeWatchdogState();
             }
         }));
     }
@@ -4291,6 +4778,10 @@ void MainComponent::buttonClicked(juce::Button* button)
         cachedSettings.followAutoEnableWindowState = followAutoEnableWindowToggle.getToggleState();
         saveCachedSettings();
     }
+    else if (button == &lowCpuModeToggle)
+    {
+        applyLowCpuModeSetting(lowCpuModeToggle.getToggleState(), true, true);
+    }
     else if (button == &checkUpdatesButton)
     {
         triggerUpdateCheck(true);
@@ -4329,16 +4820,37 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
     {
         if (suppressPluginAddFromSelection)
             return;
+
+        if (cachedSettings.lowCpuUsageMode && getNumRows() >= 1)
+        {
+            setEffectsHint("Low CPU mode allows one effect slot. Clear it before loading another.", 140);
+            vstAvailableBox.setSelectedId(0, juce::dontSendNotification);
+            return;
+        }
+
         const auto selected = vstAvailableBox.getSelectedId() - 1;
         auto known = engine.getVstHost().getKnownPluginDescriptions();
         if (selected >= 0 && selected < known.size())
         {
-            juce::String error;
             const auto pluginFormat = getPluginRuntimeFormat(engine.getDiagnostics());
-            engine.getVstHost().addPlugin(known.getReference(selected), pluginFormat.sampleRate, pluginFormat.blockSize, error);
-            if (error.isNotEmpty())
-                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Plugin Load Failed", error);
-            refreshPluginChainUi();
+            const auto description = known.getReference(selected);
+            launchBlockingTask("Another task is already running.",
+                               "Loading VST",
+                               [this, description, pluginFormat](juce::String& error)
+                               {
+                                   engine.getVstHost().addPlugin(description, pluginFormat.sampleRate, pluginFormat.blockSize, error);
+                               },
+                               [this](const juce::String& error)
+                               {
+                                   suppressPluginAddFromSelection = true;
+                                   vstAvailableBox.setSelectedId(0, juce::dontSendNotification);
+                                   suppressPluginAddFromSelection = false;
+                                   refreshPluginChainUi();
+                                   if (error.isNotEmpty())
+                                       juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Plugin Load Failed", error);
+                                   else
+                                       setEffectsHint("VST loaded", 45);
+                               });
         }
     }
     else if (comboBoxThatHasChanged == &appearanceThemeBox)
@@ -4365,9 +4877,16 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
         saveCachedSettings();
         if (engine.isListenEnabled() && cachedSettings.listenMonitorDeviceName.isNotEmpty())
         {
-            engine.setMonitorOutputDevice(cachedSettings.listenMonitorDeviceName);
-            engine.setListenEnabled(true);
+            enableListenFromSettings(false);
         }
+    }
+    else if (comboBoxThatHasChanged == &behaviorListenBufferBox)
+    {
+        cachedSettings.listenBufferSize = parseListenBufferSize(behaviorListenBufferBox);
+        populateListenBufferBox(behaviorListenBufferBox, cachedSettings.bufferSize, cachedSettings.listenBufferSize);
+        saveCachedSettings();
+        if (engine.isListenEnabled())
+            enableListenFromSettings(false);
     }
     else if (comboBoxThatHasChanged == &presetBox)
     {
@@ -4379,8 +4898,6 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
         if (! hasUnsavedPresetChanges())
         {
             loadPresetByName(pendingPresetName);
-            refreshPresets();
-            presetBox.setText(currentPresetName, juce::dontSendNotification);
             return;
         }
 
@@ -4417,35 +4934,26 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
                     if (saveResult == 1)
                     {
                         auto saveName = prompt->getTextEditorContents("name").trim();
-                        if (saveName.isEmpty())
-                            saveName = "Preset-" + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
-
-                        auto preset = buildCurrentPresetData(saveName);
-                        presetStore.savePreset(preset);
-                        currentPresetName = preset.name;
-                        cachedSettings.lastPresetName = currentPresetName;
-                        saveCachedSettings();
-                        persistLastPresetName(currentPresetName);
-                        markCurrentPresetSnapshot();
-                        clearAutosaveDraft();
+                        savePresetAsync(saveName, [this]
+                        {
+                            loadPresetByName(pendingPresetName);
+                        });
+                        return;
                     }
 
                     loadPresetByName(pendingPresetName);
-                    refreshPresets();
-                    presetBox.setText(currentPresetName, juce::dontSendNotification);
                 }), true);
                 return;
             }
 
             loadPresetByName(pendingPresetName);
-            refreshPresets();
-            presetBox.setText(currentPresetName, juce::dontSendNotification);
         }));
     }
 }
 
 void MainComponent::timerCallback()
 {
+    runtimeWatchdog.heartbeat();
     const bool windowVisible = isShowing();
     if (windowVisible)
         recoverFromModalBlockers(false);
@@ -4460,12 +4968,30 @@ void MainComponent::timerCallback()
     };
 
     ++uiTickCount;
+    if ((uiTickCount % 10) == 0)
+        publishRuntimeWatchdogState();
 
     if (draggingWindow)
     {
         uiPulse += 0.010f;
         setTimerRate(60);
         repaint(headerBounds.expanded(28, 12));
+        return;
+    }
+
+    const bool hiddenLowCpuMode = cachedSettings.lowCpuUsageMode && ! windowVisible;
+    if (hiddenLowCpuMode)
+    {
+        if (cachedSettings.autoEnableByApp)
+        {
+            pollAutoEnableState();
+            setTimerRate(1);
+        }
+        else if (uiTimerHz != 0)
+        {
+            uiTimerHz = 0;
+            stopTimer();
+        }
         return;
     }
 
@@ -4491,69 +5017,7 @@ void MainComponent::timerCallback()
     }
 
     if (cachedSettings.autoEnableByApp && (uiTickCount % 10 == 0))
-    {
-        bool hasCondition = false;
-        const auto shouldEnable = computeAutoEnableShouldEnable(hasCondition);
-        if (manualEffectsPinnedOn)
-        {
-            params.bypass.store(false);
-            effectsToggle.setToggleState(true, juce::dontSendNotification);
-            effectsToggle.setButtonText("Effects On");
-            setEffectsHint({}, 0);
-        }
-        else
-        {
-            if (! hasCondition)
-            {
-                // No auto-enable condition configured: do not interfere with manual control.
-                manualEffectsOverrideAutoEnable = false;
-            }
-            else if (shouldEnable)
-            {
-                if (manualEffectsOverrideAutoEnable && ! effectsToggle.getToggleState())
-                {
-                    setEffectsHint("Overriding auto-enable", 45);
-                }
-                else
-                {
-                    manualEffectsOverrideAutoEnable = false;
-                    params.bypass.store(false);
-                    effectsToggle.setToggleState(true, juce::dontSendNotification);
-                    effectsToggle.setButtonText("Effects On");
-                    setEffectsHint({}, 0);
-                }
-
-                if (cachedSettings.autoListenOnAutoEnable && ! engine.isListenEnabled())
-                    enableListenFromSettings(false);
-            }
-            else if (! shouldEnable)
-            {
-                manualEffectsOverrideAutoEnable = false;
-            }
-        }
-
-        if (cachedSettings.followAutoEnableWindowState && hasCondition)
-        {
-            if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
-            {
-                if (shouldEnable && ! wasFollowAutoEnableMatched)
-                {
-                    window->setVisible(true);
-                    window->setMinimised(false);
-                    window->toFront(true);
-                }
-                else if (! shouldEnable && wasFollowAutoEnableMatched)
-                {
-                    window->setVisible(false);
-                }
-            }
-            wasFollowAutoEnableMatched = shouldEnable;
-        }
-        else
-        {
-            wasFollowAutoEnableMatched = false;
-        }
-    }
+        pollAutoEnableState();
 
     const auto listenEnabled = engine.isListenEnabled();
     const bool listenStateChanged = (listenEnabled != lastListenEnabledState);
@@ -5081,6 +5545,19 @@ void MainComponent::paintOverChildren(juce::Graphics& g)
         arc.addCentredArc(spinnerCenter.x, spinnerCenter.y, 18.0f, 18.0f, 0.0f, startAngle, startAngle + 4.9f, true);
         g.setColour(kUiAccentSoft.withAlpha(0.95f * restartOverlayAlpha));
         g.strokePath(arc, juce::PathStrokeType(3.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (restartOverlayText.isNotEmpty())
+        {
+            juce::Font overlayFont(juce::FontOptions(14.0f * uiScale, juce::Font::bold));
+            overlayFont.setExtraKerningFactor(0.02f);
+            g.setFont(overlayFont);
+            g.setColour(kUiText.withAlpha(0.96f * restartOverlayAlpha));
+            auto textBounds = shell.withSizeKeepingCentre(shell.getWidth() * 0.68f, 28.0f * uiScale)
+                               .translated(0.0f, 54.0f * uiScale);
+            g.drawFittedText(restartOverlayText,
+                             textBounds.toNearestInt(),
+                             juce::Justification::centred,
+                             1);
+        }
         g.restoreState();
     }
 }
@@ -5360,7 +5837,7 @@ void MainComponent::resized()
                 case 2:
                     return h22 + h28 + gap + h28 + gap + h30 + gap + h56 + gap + h20 + h30;
                 case 3:
-                    return h22 + gap + h20 + h30 + gap + h20 + h96 + gap + h30 + gap
+                    return h22 + gap + h20 + h30 + gap + h20 + h30 + gap + h28 + gap + h20 + h96 + gap + h30 + gap
                          + h28 + gap + h28 + gap + h28 + gap + h36;
                 default:
                     break;
@@ -5438,6 +5915,11 @@ void MainComponent::resized()
             contentNoFooter.removeFromTop(gap);
             behaviorListenDeviceLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(20.0f * uiScale)));
             behaviorListenDeviceBox.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(30.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
+            behaviorListenBufferLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(20.0f * uiScale)));
+            behaviorListenBufferBox.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(30.0f * uiScale)));
+            contentNoFooter.removeFromTop(gap);
+            lowCpuModeToggle.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(28.0f * uiScale)));
             contentNoFooter.removeFromTop(gap);
             behaviorVstFoldersLabel.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(20.0f * uiScale)));
             behaviorVstFoldersListBox.setBounds(contentNoFooter.removeFromTop(juce::roundToInt(96.0f * uiScale)));

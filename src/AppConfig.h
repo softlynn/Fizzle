@@ -7,6 +7,24 @@ namespace fizzle
 {
 constexpr double kInternalSampleRate = 48000.0;
 constexpr int kDefaultBlockSize = 256;
+constexpr int kMinAudioBufferSize = 32;
+constexpr int kMaxAudioBufferSize = 2048;
+
+inline int sanitizeAudioBufferSize(int requested, int fallback = kDefaultBlockSize)
+{
+    const auto safeFallback = juce::jlimit(kMinAudioBufferSize,
+                                           kMaxAudioBufferSize,
+                                           fallback > 0 ? fallback : kDefaultBlockSize);
+    if (requested <= 0)
+        return safeFallback;
+
+    return juce::jlimit(kMinAudioBufferSize, kMaxAudioBufferSize, requested);
+}
+
+inline int sanitizeOptionalAudioBufferSize(int requested)
+{
+    return requested > 0 ? sanitizeAudioBufferSize(requested) : 0;
+}
 
 struct EffectParameters
 {
@@ -32,6 +50,7 @@ struct EngineSettings
     juce::String outputDeviceName;
     juce::String outputDeviceType { "Windows Audio" };
     int bufferSize { kDefaultBlockSize };
+    int listenBufferSize { 0 };
     double preferredSampleRate { kInternalSampleRate };
     juce::String vstScanFolder;
     bool hasCompletedInitialVstScan { false };
@@ -49,6 +68,7 @@ struct EngineSettings
     bool startWithWindows { false };
     bool startMinimizedToTray { false };
     bool followAutoEnableWindowState { false };
+    bool lowCpuUsageMode { false };
     bool lightMode { false };
     bool transparentBackground { false };
     int themeVariant { 0 }; // 0 = Aqua, 1 = Salmon

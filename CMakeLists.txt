@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Fizzle VERSION 0.2.7 LANGUAGES CXX)
+project(Fizzle VERSION 0.2.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +19,13 @@ FetchContent_MakeAvailable(juce)
 
 include(cmake/Version.cmake)
 include(cmake/Warnings.cmake)
+
+if (WIN32)
+  configure_file(resources/icon/app.rc
+                 ${CMAKE_CURRENT_BINARY_DIR}/generated/FizzleAppResources.rc
+                 @ONLY)
+  file(TO_CMAKE_PATH "${CMAKE_CURRENT_BINARY_DIR}/generated/FizzleAppResources.rc" FIZZLE_WIN_RC_FILE)
+endif()
 
 juce_add_binary_data(FizzleAssets
   SOURCES
@@ -39,6 +46,8 @@ set(FIZZLE_SOURCES
   src/core/SettingsStore.cpp
   src/core/Logger.h
   src/core/Logger.cpp
+  src/core/RuntimeWatchdog.h
+  src/core/RuntimeWatchdog.cpp
   src/core/PresetStore.h
   src/core/PresetStore.cpp
   src/audio/Biquad.h
@@ -65,10 +74,6 @@ set(FIZZLE_SOURCES
   src/ui/TrayController.cpp
 )
 
-if (WIN32)
-  list(APPEND FIZZLE_SOURCES resources/icon/app.rc)
-endif()
-
 target_sources(Fizzle PRIVATE ${FIZZLE_SOURCES})
 
 juce_generate_juce_header(Fizzle)
@@ -81,6 +86,12 @@ target_compile_definitions(Fizzle PRIVATE
   JUCE_PLUGINHOST_VST3=1
   FIZZLE_VERSION="${PROJECT_VERSION}"
 )
+
+if (WIN32)
+  target_compile_definitions(Fizzle PRIVATE
+    JUCE_USER_DEFINED_RC_FILE="${FIZZLE_WIN_RC_FILE}"
+  )
+endif()
 
 target_include_directories(Fizzle PRIVATE src)
 
@@ -105,12 +116,14 @@ if (WIN32)
   set_target_properties(Fizzle PROPERTIES
     WIN32_EXECUTABLE TRUE
   )
+  target_link_libraries(Fizzle PRIVATE Psapi)
 endif()
 
 if(FIZZLE_BUILD_TESTS)
   enable_testing()
   add_executable(FizzleTests
     tests/TestMain.cpp
+    tests/AppConfigTests.cpp
     tests/DspTests.cpp
     tests/DeviceRoutingTests.cpp
     src/audio/Biquad.h

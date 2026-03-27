@@ -23,7 +23,17 @@ public:
 
     void setRefreshActive(bool active)
     {
-        const auto desiredHz = active ? 4 : 1;
+        if (! active)
+        {
+            if (refreshHz == 0)
+                return;
+
+            refreshHz = 0;
+            stopTimer();
+            return;
+        }
+
+        const auto desiredHz = 4;
         if (desiredHz == refreshHz)
             return;
 
@@ -83,6 +93,8 @@ private:
         s << line("Output Device", d.outputDevice);
         s << line("Sample Rate", juce::String(d.sampleRate, 1) + " Hz");
         s << line("Buffer Size", juce::String(d.bufferSize));
+        s << line("Listen Buffer", d.listenBufferSize > 0 ? juce::String(d.listenBufferSize) : juce::String("Off"));
+        s << line("Proc Chunk", juce::String(d.processingChunkSize));
         s << line("CPU Load", juce::String(d.cpuPercent, 2) + "%");
         s << line("Latency (Dry)", juce::String(d.dryLatencyMs, 1) + " ms");
         s << line("Latency (Post)", juce::String(d.postFxLatencyMs, 1) + " ms");

@@ -5,10 +5,12 @@
 #include "../audio/AudioEngine.h"
 #include "../core/SettingsStore.h"
 #include "../core/PresetStore.h"
+#include "../core/RuntimeWatchdog.h"
 #include "MeterComponent.h"
 #include "DiagnosticsPanel.h"
 #include <vector>
 #include <atomic>
+#include <functional>
 #include <thread>
 
 namespace fizzle
@@ -124,6 +126,8 @@ private:
     juce::Label startupLabel;
     juce::Label behaviorListenDeviceLabel;
     juce::ComboBox behaviorListenDeviceBox;
+    juce::Label behaviorListenBufferLabel;
+    juce::ComboBox behaviorListenBufferBox;
     juce::Label behaviorVstFoldersLabel;
     juce::ListBox behaviorVstFoldersListBox { "VST Search Folders", nullptr };
     juce::TextButton behaviorAddVstFolderButton { "Add Folder..." };
@@ -131,6 +135,7 @@ private:
     juce::ToggleButton startWithWindowsToggle { "Start with Windows" };
     juce::ToggleButton startMinimizedToggle { "Start minimized to tray" };
     juce::ToggleButton followAutoEnableWindowToggle { "Open/close window with Program Auto-Enable" };
+    juce::ToggleButton lowCpuModeToggle { "Low CPU mode" };
     juce::Label startupHintLabel;
     juce::ListBox appListBox { "Programs", nullptr };
     juce::ListBox enabledProgramsListBox { "Enabled Programs", nullptr };
@@ -143,6 +148,7 @@ private:
     MeterComponent meterIn;
     MeterComponent meterOut;
     DiagnosticsPanel diagnostics;
+    RuntimeWatchdog runtimeWatchdog;
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::unique_ptr<juce::DocumentWindow> pluginEditorWindow;
     float uiPulse { 0.0f };
@@ -215,6 +221,8 @@ private:
     float restartOverlayTargetAlpha { 0.0f };
     int restartOverlayTicks { 0 };
     juce::String restartOverlayText;
+    std::thread blockingTaskThread;
+    std::atomic<bool> blockingTaskInFlight { false };
     int settingsScrollY { 0 };
     int settingsScrollMax { 0 };
     int uiTimerHz { 30 };
@@ -222,6 +230,8 @@ private:
     juce::uint32 appStartMs { 0 };
     juce::uint32 lastDraftAutosaveCheckMs { 0 };
     juce::String lastAutosaveDraftFingerprint;
+    uint64_t lastPresetVstMutationCounter { 0 };
+    uint64_t lastAutosaveDraftVstMutationCounter { 0 };
     bool safeStartupMode { false };
     struct FizzBubble
     {
@@ -256,6 +266,14 @@ private:
 
     void loadDeviceLists();
     void applySettingsFromControls();
+    bool hasBlockingTaskInFlight() const;
+    void setBusyOverlay(bool busy, const juce::String& text = {});
+    bool launchBlockingTask(const juce::String& busyHint,
+                            const juce::String& overlayText,
+                            std::function<void(juce::String&)> task,
+                            std::function<void(const juce::String&)> completion);
+    juce::String buildRuntimeWatchdogState() const;
+    void publishRuntimeWatchdogState();
     void refreshKnownPlugins();
     void refreshPluginChainUi();
     void autoScanVstFolders();
@@ -288,6 +306,7 @@ private:
     void rowQuickActionMenu(int row, juce::Point<int> screenPosition);
     void rowOpenEditor(int row);
     void closePluginEditorWindow();
+    void savePresetAsync(const juce::String& name, std::function<void()> afterSave = {});
     bool computeAutoEnableShouldEnable(bool& hasCondition) const;
     bool enableListenFromSettings(bool showConflictDialog);
     void setEffectsHint(const juce::String& text, int ticks = 120);
@@ -320,6 +339,10 @@ private:
     void toggleWindowMaximize();
     void applyEffectsEnabledState(bool enabled, bool fromUserToggle);
     void runAudioRestartWithOverlay(bool fromTray);
+    void applyLowCpuModeSetting(bool enabled, bool persistSetting, bool showHint);
+    bool enforceLowCpuPluginLimit(bool showHint);
+    void updateWindowActivityState();
+    void pollAutoEnableState();
     void applyThemePalette();
     void applyUiDensity();
     void refreshAppearanceControls();

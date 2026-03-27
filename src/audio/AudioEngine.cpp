@@ -19,6 +19,8 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
     const juce::ScopedLock lifecycleScope(lifecycleLock);
 
     auto nextSettings = requested;
+    nextSettings.bufferSize = sanitizeAudioBufferSize(nextSettings.bufferSize);
+    nextSettings.listenBufferSize = sanitizeOptionalAudioBufferSize(nextSettings.listenBufferSize);
     deviceReconfiguring.store(true);
 
     juce::AudioDeviceManager::AudioDeviceSetup setup;
@@ -69,7 +71,7 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
 
     setup.inputDeviceName = nextSettings.inputDeviceName;
     setup.outputDeviceName = nextSettings.outputDeviceName;
-    setup.bufferSize = nextSettings.bufferSize;
+    setup.bufferSize = sanitizeAudioBufferSize(nextSettings.bufferSize);
     setup.sampleRate = nextSettings.preferredSampleRate;
     setup.useDefaultInputChannels = false;
     setup.useDefaultOutputChannels = false;
@@ -106,7 +108,7 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
     nextSettings.inputDeviceName = appliedSetup.inputDeviceName;
     nextSettings.outputDeviceName = appliedSetup.outputDeviceName;
     if (appliedSetup.bufferSize > 0)
-        nextSettings.bufferSize = appliedSetup.bufferSize;
+        nextSettings.bufferSize = sanitizeAudioBufferSize(appliedSetup.bufferSize, nextSettings.bufferSize);
     if (appliedSetup.sampleRate > 0.0)
         nextSettings.preferredSampleRate = appliedSetup.sampleRate;
 
@@ -114,6 +116,8 @@ bool AudioEngine::start(const EngineSettings& requested, juce::String& error)
         const juce::ScopedLock settingsScope(settingsLock);
         settings = nextSettings;
     }
+    lowCpuModeEnabled.store(nextSettings.lowCpuUsageMode);
+    vstHost.setLowCpuModeEnabled(nextSettings.lowCpuUsageMode);
 
     deviceManager.addAudioCallback(this);
 
@@ -140,10 +144,20 @@ void AudioEngine::setMonitorOutputDevice(const juce::String& name)
     monitorOutputDevice = name;
 }
 
+void AudioEngine::setLowCpuModeEnabled(bool enabled)
+{
+    lowCpuModeEnabled.store(enabled);
+    vstHost.setLowCpuModeEnabled(enabled);
+
+    const juce::ScopedLock settingsScope(settingsLock);
+    settings.lowCpuUsageMode = enabled;
+}
+
 void AudioEngine::setListenEnabled(bool enabled)
 {
     const juce::ScopedLock lifecycleScope(lifecycleLock);
     listenEnabled.store(enabled);
+    currentListenBufferSize.store(0);
 
     monitorDeviceManager.removeAudioCallback(&monitorCallback);
     monitorDeviceManager.closeAudioDevice();
@@ -177,8 +191,10 @@ void AudioEngine::setListenEnabled(bool enabled)
     if (preferredRate > 0.0)
         setup.sampleRate = preferredRate;
     const auto current = currentSettings();
-    if (current.bufferSize > 0)
-        setup.bufferSize = current.bufferSize;
+    const auto listenBuffer = current.listenBufferSize > 0
+        ? sanitizeAudioBufferSize(current.listenBufferSize, current.bufferSize)
+        : sanitizeAudioBufferSize(current.bufferSize);
+    setup.bufferSize = listenBuffer;
 
     error = monitorDeviceManager.setAudioDeviceSetup(setup, true);
     if (error.isNotEmpty())
@@ -204,6 +220,10 @@ void AudioEngine::setListenEnabled(bool enabled)
     monitorDeviceManager.getAudioDeviceSetup(appliedMonitorSetup);
     if (appliedMonitorSetup.outputDeviceName.isNotEmpty())
         monitorOutputDevice = appliedMonitorSetup.outputDeviceName;
+    if (appliedMonitorSetup.bufferSize > 0)
+        currentListenBufferSize.store(sanitizeAudioBufferSize(appliedMonitorSetup.bufferSize, listenBuffer));
+    else
+        currentListenBufferSize.store(listenBuffer);
 
     monitorDeviceManager.addAudioCallback(&monitorCallback);
 }
@@ -253,8 +273,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         return;
     }
 
-    const auto tick = juce::Time::getHighResolutionTicks();
-
     if (numSamples <= 0 || outputChannelData == nullptr)
         return;
 
@@ -267,97 +285,118 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     }
 
     const auto processChannels = juce::jmax(2, juce::jmax(numInputChannels, numOutputChannels));
-    inBuffer.setSize(juce::jmax(1, numInputChannels), numSamples, false, false, true);
-    for (int ch = 0; ch < numInputChannels; ++ch)
-    {
-        if (inputChannelData[ch] != nullptr)
-            inBuffer.copyFrom(ch, 0, inputChannelData[ch], numSamples);
-        else
-            inBuffer.clear(ch, 0, numSamples);
-    }
-
     const auto deviceRate = currentDeviceSampleRate.load();
     const auto safeDeviceRate = (deviceRate > 1000.0) ? deviceRate : kInternalSampleRate;
-    internalBuffer.setSize(processChannels, numSamples, false, false, true);
-    internalBuffer.clear();
-    for (int ch = 0; ch < numInputChannels; ++ch)
-        internalBuffer.copyFrom(ch, 0, inBuffer, ch, 0, numSamples);
-    if (numInputChannels == 1 && internalBuffer.getNumChannels() > 1)
-        internalBuffer.copyFrom(1, 0, internalBuffer, 0, 0, numSamples);
+    const auto activeListenBuffer = currentListenBufferSize.load();
+    const bool listenActive = listenEnabled.load();
+    const auto processingChunkSize = (listenActive && activeListenBuffer > 0 && activeListenBuffer < numSamples)
+        ? activeListenBuffer
+        : numSamples;
+    currentProcessingChunkSize.store(processingChunkSize);
+
+    const bool hiddenLowCpuMode = lowCpuModeEnabled.load() && ! uiVisible.load();
+    const auto nowMs = juce::Time::getMillisecondCounter();
+    const bool refreshDiagnosticsNow = ! hiddenLowCpuMode
+        || static_cast<juce::uint32>(nowMs - lastLowCpuDiagnosticsUpdateMs.load()) >= 250u;
+    const auto tick = refreshDiagnosticsNow ? juce::Time::getHighResolutionTicks() : 0;
 
     float inPeak = 0.0f;
-    for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
-        inPeak = juce::jmax(inPeak, internalBuffer.getMagnitude(c, 0, internalBuffer.getNumSamples()));
+    float outPeak = 0.0f;
+    const auto phaseDelta = juce::MathConstants<double>::twoPi * 440.0 / safeDeviceRate;
+    auto phase = tonePhase.load();
+    const auto gain = juce::Decibels::decibelsToGain(params->outputGainDb.load());
+    const bool bypass = params->bypass.load();
+    const bool muted = params->mute.load();
+    const bool toneEnabled = testToneEnabled.load();
 
-    if (testToneEnabled.load())
+    for (int sampleOffset = 0; sampleOffset < numSamples; sampleOffset += processingChunkSize)
     {
-        const auto phaseDelta = juce::MathConstants<double>::twoPi * 440.0 / safeDeviceRate;
-        auto phase = tonePhase.load();
-        for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
-        {
-            auto* d = internalBuffer.getWritePointer(c);
-            for (int i = 0; i < internalBuffer.getNumSamples(); ++i)
-                d[i] = static_cast<float>(std::sin(phase + static_cast<double>(i) * phaseDelta) * 0.1);
-        }
-        phase += phaseDelta * static_cast<double>(internalBuffer.getNumSamples());
-        tonePhase.store(std::fmod(phase, juce::MathConstants<double>::twoPi));
-    }
-
-    // Built-in FX removed: VST chain is the processing path.
-    if (! params->bypass.load())
-        vstHost.processBlock(internalBuffer);
-
-    if (params->mute.load())
+        const auto chunkSamples = juce::jmin(processingChunkSize, numSamples - sampleOffset);
+        internalBuffer.setSize(processChannels, chunkSamples, false, false, true);
         internalBuffer.clear();
 
-    internalBuffer.applyGain(juce::Decibels::decibelsToGain(params->outputGainDb.load()));
-
-    float outPeak = 0.0f;
-    for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
-        outPeak = juce::jmax(outPeak, internalBuffer.getMagnitude(c, 0, internalBuffer.getNumSamples()));
-
-    for (int ch = 0; ch < numOutputChannels; ++ch)
-    {
-        if (outputChannelData[ch] != nullptr)
-            juce::FloatVectorOperations::copy(outputChannelData[ch],
-                                              internalBuffer.getReadPointer(juce::jmin(ch, internalBuffer.getNumChannels() - 1)),
-                                              numSamples);
-    }
-
-    if (listenEnabled.load())
-    {
-        int start1, size1, start2, size2;
-        monitorFifo.prepareToWrite(numSamples, start1, size1, start2, size2);
-        for (int c = 0; c < 2; ++c)
+        for (int ch = 0; ch < numInputChannels; ++ch)
         {
-            auto* fifo = monitorFifoBuffer.getWritePointer(c);
-            const auto* src = internalBuffer.getReadPointer(juce::jmin(c, internalBuffer.getNumChannels() - 1));
-            if (size1 > 0)
-                juce::FloatVectorOperations::copy(fifo + start1, src, size1);
-            if (size2 > 0)
-                juce::FloatVectorOperations::copy(fifo + start2, src + size1, size2);
+            if (inputChannelData[ch] != nullptr)
+                juce::FloatVectorOperations::copy(internalBuffer.getWritePointer(ch),
+                                                  inputChannelData[ch] + sampleOffset,
+                                                  chunkSamples);
         }
-        monitorFifo.finishedWrite(size1 + size2);
+
+        if (numInputChannels == 1 && internalBuffer.getNumChannels() > 1)
+            juce::FloatVectorOperations::copy(internalBuffer.getWritePointer(1),
+                                              internalBuffer.getReadPointer(0),
+                                              chunkSamples);
+
+        if (refreshDiagnosticsNow)
+        {
+            for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
+                inPeak = juce::jmax(inPeak, internalBuffer.getMagnitude(c, 0, chunkSamples));
+        }
+
+        if (toneEnabled)
+        {
+            for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
+            {
+                auto* d = internalBuffer.getWritePointer(c);
+                for (int i = 0; i < chunkSamples; ++i)
+                    d[i] = static_cast<float>(std::sin(phase + static_cast<double>(i) * phaseDelta) * 0.1);
+            }
+            phase += phaseDelta * static_cast<double>(chunkSamples);
+        }
+
+        if (! bypass)
+            vstHost.processBlock(internalBuffer);
+
+        if (muted)
+            internalBuffer.clear();
+
+        internalBuffer.applyGain(gain);
+
+        if (refreshDiagnosticsNow)
+        {
+            for (int c = 0; c < internalBuffer.getNumChannels(); ++c)
+                outPeak = juce::jmax(outPeak, internalBuffer.getMagnitude(c, 0, chunkSamples));
+        }
+
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+        {
+            if (outputChannelData[ch] != nullptr)
+                juce::FloatVectorOperations::copy(outputChannelData[ch] + sampleOffset,
+                                                  internalBuffer.getReadPointer(juce::jmin(ch, internalBuffer.getNumChannels() - 1)),
+                                                  chunkSamples);
+        }
+
+        if (listenActive)
+            pushMonitorBlock(internalBuffer, 0, chunkSamples);
     }
 
-    const auto elapsedTicks = juce::Time::getHighResolutionTicks() - tick;
-    const auto seconds = juce::Time::highResolutionTicksToSeconds(elapsedTicks);
-    const auto blockSeconds = static_cast<double>(numSamples) / safeDeviceRate;
-    const auto configuredBuffer = numSamples;
+    tonePhase.store(std::fmod(phase, juce::MathConstants<double>::twoPi));
 
-    const juce::ScopedLock sl(diagnosticsLock);
-    diagnostics.sampleRate = safeDeviceRate;
-    diagnostics.bufferSize = configuredBuffer;
-    diagnostics.cpuPercent = juce::jlimit(0.0, 100.0, (seconds / blockSeconds) * 100.0);
-    const auto dryMs = (safeDeviceRate > 0.0) ? ((2.0 * static_cast<double>(configuredBuffer)) / safeDeviceRate) * 1000.0 : 0.0;
-    const auto pluginMs = (safeDeviceRate > 0.0) ? (1000.0 * static_cast<double>(vstHost.getLatencySamples()) / safeDeviceRate) : 0.0;
-    diagnostics.dryLatencyMs = dryMs;
-    diagnostics.postFxLatencyMs = dryMs + pluginMs;
-    diagnostics.inputLevel = inPeak;
-    diagnostics.outputLevel = outPeak;
-    if (seconds > blockSeconds)
-        ++droppedBuffers;
-    diagnostics.droppedBuffers = droppedBuffers.load();
+    if (refreshDiagnosticsNow)
+    {
+        lastLowCpuDiagnosticsUpdateMs.store(nowMs);
+        const auto elapsedTicks = juce::Time::getHighResolutionTicks() - tick;
+        const auto seconds = juce::Time::highResolutionTicksToSeconds(elapsedTicks);
+        const auto blockSeconds = static_cast<double>(numSamples) / safeDeviceRate;
+        const auto configuredBuffer = numSamples;
+
+        const juce::ScopedLock sl(diagnosticsLock);
+        diagnostics.sampleRate = safeDeviceRate;
+        diagnostics.bufferSize = configuredBuffer;
+        diagnostics.listenBufferSize = listenActive ? juce::jmax(0, activeListenBuffer) : 0;
+        diagnostics.processingChunkSize = processingChunkSize;
+        diagnostics.cpuPercent = juce::jlimit(0.0, 100.0, (seconds / blockSeconds) * 100.0);
+        const auto dryMs = (safeDeviceRate > 0.0) ? ((2.0 * static_cast<double>(configuredBuffer)) / safeDeviceRate) * 1000.0 : 0.0;
+        const auto pluginMs = (safeDeviceRate > 0.0) ? (1000.0 * static_cast<double>(vstHost.getLatencySamples()) / safeDeviceRate) : 0.0;
+        diagnostics.dryLatencyMs = dryMs;
+        diagnostics.postFxLatencyMs = dryMs + pluginMs;
+        diagnostics.inputLevel = inPeak;
+        diagnostics.outputLevel = outPeak;
+        if (seconds > blockSeconds)
+            ++droppedBuffers;
+        diagnostics.droppedBuffers = droppedBuffers.load();
+    }
 }
 
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
@@ -365,8 +404,12 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     const juce::SpinLock::ScopedLockType ioLock(ioCallbackLock);
     const auto rawRate = device != nullptr ? device->getCurrentSampleRate() : kInternalSampleRate;
     const auto sampleRate = rawRate > 1000.0 ? rawRate : kInternalSampleRate;
-    const auto deviceBuffer = device != nullptr ? juce::jmax(1, device->getCurrentBufferSizeSamples()) : 256;
+    const auto deviceBuffer = device != nullptr
+        ? sanitizeAudioBufferSize(device->getCurrentBufferSizeSamples(), kDefaultBlockSize)
+        : kDefaultBlockSize;
     currentDeviceSampleRate.store(sampleRate);
+    currentDeviceBufferSize.store(deviceBuffer);
+    currentProcessingChunkSize.store(deviceBuffer);
     chain.prepare(sampleRate, 2);
     chain.reset();
     vstHost.prepare(sampleRate, juce::jmax(64, deviceBuffer));
@@ -378,7 +421,9 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
         diagnostics.inputDevice = current.inputDeviceName;
         diagnostics.outputDevice = current.outputDeviceName;
         diagnostics.sampleRate = sampleRate;
-        diagnostics.bufferSize = device->getCurrentBufferSizeSamples();
+        diagnostics.bufferSize = deviceBuffer;
+        diagnostics.listenBufferSize = currentListenBufferSize.load();
+        diagnostics.processingChunkSize = currentProcessingChunkSize.load();
         const auto ioMs = (device->getInputLatencyInSamples() + device->getOutputLatencyInSamples()) * 1000.0 / sampleRate;
         diagnostics.dryLatencyMs = ioMs;
         diagnostics.postFxLatencyMs = ioMs + (1000.0 * static_cast<double>(vstHost.getLatencySamples()) / sampleRate);
@@ -451,6 +496,26 @@ void AudioEngine::handleAsyncUpdate()
         Logger::instance().log("Auto recovery restart succeeded (" + reason + ")");
 }
 
+void AudioEngine::pushMonitorBlock(const juce::AudioBuffer<float>& source, int startSample, int numSamples)
+{
+    if (numSamples <= 0)
+        return;
+
+    int start1, size1, start2, size2;
+    monitorFifo.prepareToWrite(numSamples, start1, size1, start2, size2);
+    for (int c = 0; c < 2; ++c)
+    {
+        auto* fifo = monitorFifoBuffer.getWritePointer(c);
+        const auto* src = source.getReadPointer(juce::jmin(c, source.getNumChannels() - 1), startSample);
+        if (size1 > 0)
+            juce::FloatVectorOperations::copy(fifo + start1, src, size1);
+        if (size2 > 0)
+            juce::FloatVectorOperations::copy(fifo + start2, src + size1, size2);
+    }
+
+    monitorFifo.finishedWrite(size1 + size2);
+}
+
 void AudioEngine::MonitorCallback::audioDeviceIOCallbackWithContext(const float* const*, int, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
     if (outputChannelData == nullptr || numSamples <= 0)
@@ -461,7 +526,7 @@ void AudioEngine::MonitorCallback::audioDeviceIOCallbackWithContext(const float*
             juce::FloatVectorOperations::clear(outputChannelData[c], numSamples);
 
     const auto queued = owner.monitorFifo.getNumReady();
-    const auto maxQueued = numSamples * 2;
+    const auto maxQueued = juce::jmax(numSamples, owner.currentListenBufferSize.load()) * 2;
     if (queued > maxQueued)
     {
         int dropStart1, dropSize1, dropStart2, dropSize2;

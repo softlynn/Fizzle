@@ -105,6 +105,8 @@ bool VstHost::createHostedPlugin(const juce::PluginDescription& description,
     auto hosted = std::make_shared<HostedPlugin>();
     hosted->description = resolved;
     hosted->instance.reset(result.release());
+    hosted->mutationListener.counter = &mutationCounter;
+    hosted->instance->addListener(&hosted->mutationListener);
     if (! preparePluginInstance(*hosted, sampleRate, blockSize, "prepare"))
     {
         error = "Plugin failed to initialize: " + resolved.name;
@@ -123,10 +125,18 @@ std::vector<VstHost::HostedPluginPtr> VstHost::copyChainSnapshot() const
 void VstHost::refreshLatencyCacheLocked()
 {
     int total = 0;
+    const bool lowCpuMode = lowCpuModeEnabled.load();
+    int activePlugins = 0;
     for (const auto& plugin : chain)
     {
+        if (lowCpuMode && activePlugins >= 1)
+            break;
+
         if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load()
             || plugin->faulted.load() || plugin->editorOpen.load())
+            continue;
+
+        if (juce::jlimit(0.0f, 1.0f, plugin->mix.load()) <= 0.0001f)
             continue;
 
         try
@@ -135,6 +145,7 @@ void VstHost::refreshLatencyCacheLocked()
             if (! lock.isLocked())
                 continue;
             total += plugin->instance->getLatencySamples();
+            ++activePlugins;
         }
         catch (...)
         {
@@ -240,6 +251,7 @@ bool VstHost::addPlugin(const juce::PluginDescription& description, double sampl
     const juce::ScopedLock sl(chainLock);
     chain.push_back(std::move(hosted));
     refreshLatencyCacheLocked();
+    mutationCounter.fetch_add(1);
     return true;
 }
 
@@ -292,6 +304,8 @@ bool VstHost::addPluginWithState(const juce::PluginDescription& description,
         refreshLatencyCacheLocked();
     }
 
+    mutationCounter.fetch_add(1);
+
     return true;
 }
 
@@ -320,6 +334,7 @@ void VstHost::removePlugin(int index)
 
     chain.erase(chain.begin() + index);
     refreshLatencyCacheLocked();
+    mutationCounter.fetch_add(1);
 }
 
 void VstHost::movePlugin(int from, int to)
@@ -333,6 +348,7 @@ void VstHost::movePlugin(int from, int to)
     auto item = std::move(chain[static_cast<size_t>(from)]);
     chain.erase(chain.begin() + from);
     chain.insert(chain.begin() + to, std::move(item));
+    mutationCounter.fetch_add(1);
 }
 
 void VstHost::swapPlugin(int first, int second)
@@ -344,6 +360,7 @@ void VstHost::swapPlugin(int first, int second)
         return;
 
     std::swap(chain[static_cast<size_t>(first)], chain[static_cast<size_t>(second)]);
+    mutationCounter.fetch_add(1);
 }
 
 void VstHost::setEnabled(int index, bool enabled)
@@ -357,6 +374,7 @@ void VstHost::setEnabled(int index, bool enabled)
         if (target != nullptr)
             target->enabled.store(enabled && ! target->faulted.load());
         refreshLatencyCacheLocked();
+        mutationCounter.fetch_add(1);
 }
 
 void VstHost::setMix(int index, float mix)
@@ -366,7 +384,10 @@ void VstHost::setMix(int index, float mix)
         return;
 
     if (auto& p = chain[static_cast<size_t>(index)])
+    {
         p->mix.store(juce::jlimit(0.0f, 1.0f, mix));
+        mutationCounter.fetch_add(1);
+    }
 }
 
 float VstHost::getMix(int index) const
@@ -383,6 +404,14 @@ void VstHost::clear()
     const juce::ScopedLock sl(chainLock);
     chain.clear();
     cachedLatencySamples.store(0);
+    mutationCounter.fetch_add(1);
+}
+
+void VstHost::setLowCpuModeEnabled(bool enabled)
+{
+    lowCpuModeEnabled.store(enabled);
+    const juce::ScopedLock sl(chainLock);
+    refreshLatencyCacheLocked();
 }
 
 void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
@@ -391,15 +420,15 @@ void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
     if (snapshot.empty())
         return;
 
+    const bool lowCpuMode = lowCpuModeEnabled.load();
+    int processedPlugins = 0;
     juce::MidiBuffer midi;
-    if (wetBuffer.getNumChannels() != buffer.getNumChannels()
-        || wetBuffer.getNumSamples() != buffer.getNumSamples())
-    {
-        wetBuffer.setSize(buffer.getNumChannels(), buffer.getNumSamples(), false, false, true);
-    }
 
     for (const auto& plugin : snapshot)
     {
+        if (lowCpuMode && processedPlugins >= 1)
+            break;
+
         if (plugin == nullptr || plugin->instance == nullptr || ! plugin->enabled.load()
             || plugin->faulted.load() || plugin->editorOpen.load())
             continue;
@@ -408,12 +437,29 @@ void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
         if (! lock.isLocked())
             continue;
 
-        wetBuffer.makeCopyOf(buffer, true);
+        const auto mix = juce::jlimit(0.0f, 1.0f, plugin->mix.load());
+        if (mix <= 0.0001f)
+            continue;
+
+        const bool processInPlace = mix >= 0.9999f;
+        auto* processingBuffer = &buffer;
+        if (! processInPlace)
+        {
+            if (wetBuffer.getNumChannels() != buffer.getNumChannels()
+                || wetBuffer.getNumSamples() != buffer.getNumSamples())
+            {
+                wetBuffer.setSize(buffer.getNumChannels(), buffer.getNumSamples(), false, false, true);
+            }
+
+            wetBuffer.makeCopyOf(buffer, true);
+            processingBuffer = &wetBuffer;
+        }
+
 #if JUCE_WINDOWS && defined(_MSC_VER)
         bool pluginCrashed = false;
         try
         {
-            pluginCrashed = ! processPluginBlockWithSeh(*plugin->instance, wetBuffer, midi);
+            pluginCrashed = ! processPluginBlockWithSeh(*plugin->instance, *processingBuffer, midi);
         }
         catch (...)
         {
@@ -424,32 +470,38 @@ void VstHost::processBlock(juce::AudioBuffer<float>& buffer)
         {
             plugin->faulted.store(true);
             plugin->enabled.store(false);
+            mutationCounter.fetch_add(1);
             Logger::instance().log("VST process crashed for " + plugin->description.name + " (disabled)");
             continue;
         }
 #else
         try
         {
-            plugin->instance->processBlock(wetBuffer, midi);
+            plugin->instance->processBlock(*processingBuffer, midi);
         }
         catch (...)
         {
             plugin->faulted.store(true);
             plugin->enabled.store(false);
+            mutationCounter.fetch_add(1);
             Logger::instance().log("VST process failed for " + plugin->description.name + " (disabled)");
             continue;
         }
 #endif
 
-        const auto mix = juce::jlimit(0.0f, 1.0f, plugin->mix.load());
-        const auto inv = 1.0f - mix;
-        for (int c = 0; c < buffer.getNumChannels(); ++c)
+        if (! processInPlace)
         {
-            auto* dry = buffer.getWritePointer(c);
-            const auto* wet = wetBuffer.getReadPointer(c);
-            for (int i = 0; i < buffer.getNumSamples(); ++i)
-                dry[i] = dry[i] * inv + wet[i] * mix;
+            const auto inv = 1.0f - mix;
+            for (int c = 0; c < buffer.getNumChannels(); ++c)
+            {
+                auto* dry = buffer.getWritePointer(c);
+                const auto* wet = wetBuffer.getReadPointer(c);
+                for (int i = 0; i < buffer.getNumSamples(); ++i)
+                    dry[i] = dry[i] * inv + wet[i] * mix;
+            }
         }
+
+        ++processedPlugins;
     }
 }
 

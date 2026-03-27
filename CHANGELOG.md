@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.8 - Low-Latency Listen + UI Thread Hardening
+
+### Added
+- Added a separate `Listen Buffer Size` setting so speaker monitoring can run at a lower buffer than the main virtual-mic route when the hardware allows it.
+- Diagnostics now show listen-buffer and processing-chunk sizes for faster latency troubleshooting.
+
+### Fixed
+- Moved blocking restart, device-apply, listen-toggle, preset-load, preset-save, VST-load, and undo-restore work off the message thread so the UI no longer stalls during those heavy operations.
+- Reworked listen processing so monitored audio can be processed in smaller chunks than the main device callback, reducing realtime mic-to-speaker latency without forcing the main route to the same buffer.
+- Hardened buffer-size persistence and clamping for custom values, including preset/draft serialization of the new listen buffer setting.
+
+### Changed
+- Expanded buffer-size choices down to `32` samples and up to `2048`, with editable custom buffer fields for both the main route and the listen path.
+- Updated the release build script to detect the installed Visual Studio/CMake toolchain on this system instead of assuming one fixed CMake path.
+
 ## v0.2.7 - Routing + Persistence + CPU Reduction
 
 ### Fixed

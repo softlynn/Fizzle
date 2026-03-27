@@ -12,7 +12,12 @@ EngineSettings fromVar(const juce::var& data)
         out.inputDeviceName = obj->getProperty("inputDevice").toString();
         out.outputDeviceName = obj->getProperty("outputDevice").toString();
         out.outputDeviceType = obj->getProperty("outputDeviceType").toString();
-        out.bufferSize = obj->hasProperty("bufferSize") ? static_cast<int>(obj->getProperty("bufferSize")) : kDefaultBlockSize;
+        out.bufferSize = sanitizeAudioBufferSize(obj->hasProperty("bufferSize")
+                                                     ? static_cast<int>(obj->getProperty("bufferSize"))
+                                                     : kDefaultBlockSize);
+        out.listenBufferSize = sanitizeOptionalAudioBufferSize(obj->hasProperty("listenBufferSize")
+                                                                   ? static_cast<int>(obj->getProperty("listenBufferSize"))
+                                                                   : 0);
         out.preferredSampleRate = obj->hasProperty("preferredSampleRate") ? static_cast<double>(obj->getProperty("preferredSampleRate")) : kInternalSampleRate;
         out.vstScanFolder = obj->getProperty("vstScanFolder").toString();
         out.hasCompletedInitialVstScan = obj->hasProperty("hasCompletedInitialVstScan") ? static_cast<bool>(obj->getProperty("hasCompletedInitialVstScan")) : false;
@@ -52,6 +57,9 @@ EngineSettings fromVar(const juce::var& data)
         out.followAutoEnableWindowState = obj->hasProperty("followAutoEnableWindowState")
                                               ? static_cast<bool>(obj->getProperty("followAutoEnableWindowState"))
                                               : false;
+        out.lowCpuUsageMode = obj->hasProperty("lowCpuUsageMode")
+                                  ? static_cast<bool>(obj->getProperty("lowCpuUsageMode"))
+                                  : false;
         out.lightMode = obj->hasProperty("lightMode")
                             ? static_cast<bool>(obj->getProperty("lightMode"))
                             : false;
@@ -84,7 +92,8 @@ juce::var toVar(const EngineSettings& settings)
     obj->setProperty("inputDevice", settings.inputDeviceName);
     obj->setProperty("outputDevice", settings.outputDeviceName);
     obj->setProperty("outputDeviceType", settings.outputDeviceType);
-    obj->setProperty("bufferSize", settings.bufferSize);
+    obj->setProperty("bufferSize", sanitizeAudioBufferSize(settings.bufferSize));
+    obj->setProperty("listenBufferSize", sanitizeOptionalAudioBufferSize(settings.listenBufferSize));
     obj->setProperty("preferredSampleRate", settings.preferredSampleRate);
     obj->setProperty("vstScanFolder", settings.vstScanFolder);
     obj->setProperty("hasCompletedInitialVstScan", settings.hasCompletedInitialVstScan);
@@ -106,6 +115,7 @@ juce::var toVar(const EngineSettings& settings)
     obj->setProperty("startWithWindows", settings.startWithWindows);
     obj->setProperty("startMinimizedToTray", settings.startMinimizedToTray);
     obj->setProperty("followAutoEnableWindowState", settings.followAutoEnableWindowState);
+    obj->setProperty("lowCpuUsageMode", settings.lowCpuUsageMode);
     obj->setProperty("lightMode", settings.lightMode);
     obj->setProperty("transparentBackground", settings.transparentBackground);
     obj->setProperty("themeVariant", settings.themeVariant);

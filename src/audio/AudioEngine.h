@@ -14,6 +14,8 @@ struct Diagnostics
     juce::String outputDevice;
     double sampleRate { 0.0 };
     int bufferSize { 0 };
+    int listenBufferSize { 0 };
+    int processingChunkSize { 0 };
     double cpuPercent { 0.0 };
     double dryLatencyMs { 0.0 };
     double postFxLatencyMs { 0.0 };
@@ -47,6 +49,9 @@ public:
     void setListenEnabled(bool enabled);
     bool isListenEnabled() const { return listenEnabled.load(); }
     void setMonitorOutputDevice(const juce::String& name);
+    void setLowCpuModeEnabled(bool enabled);
+    bool isLowCpuModeEnabled() const { return lowCpuModeEnabled.load(); }
+    void setUiVisible(bool visible) { uiVisible.store(visible); }
 
     VstHost& getVstHost() { return vstHost; }
     juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
@@ -101,7 +106,13 @@ private:
     std::atomic<bool> testToneEnabled { false };
     std::atomic<double> tonePhase { 0.0 };
     std::atomic<double> currentDeviceSampleRate { kInternalSampleRate };
+    std::atomic<int> currentDeviceBufferSize { kDefaultBlockSize };
+    std::atomic<int> currentListenBufferSize { 0 };
+    std::atomic<int> currentProcessingChunkSize { kDefaultBlockSize };
     std::atomic<bool> listenEnabled { false };
+    std::atomic<bool> lowCpuModeEnabled { false };
+    std::atomic<bool> uiVisible { false };
+    std::atomic<juce::uint32> lastLowCpuDiagnosticsUpdateMs { 0 };
     juce::String monitorOutputDevice;
 
     juce::AbstractFifo monitorFifo { 32768 };
@@ -113,6 +124,7 @@ private:
     juce::CriticalSection autoRecoveryLock;
 
     void queueAutoRecoveryRestart(const juce::String& reason);
+    void pushMonitorBlock(const juce::AudioBuffer<float>& source, int startSample, int numSamples);
     void handleAsyncUpdate() override;
 };
 }
