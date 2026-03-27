@@ -22,6 +22,7 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=..\resources\icon\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+PrivilegesRequiredOverridesAllowed=commandline
 CloseApplications=yes
 CloseApplicationsFilter=Fizzle.exe
 RestartApplications=no
